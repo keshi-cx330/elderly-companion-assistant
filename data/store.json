@@ -1,13 +1,92 @@
 {
+  "version": 2,
   "profile": {
     "name": "王阿姨",
     "age": "68",
     "preferences": "喜欢聊天、散步、听戏曲",
-    "notes": "",
+    "notes": "有高血压史，外出会携带常用药。",
+    "address": "上海市浦东新区示例路 18 号 2 单元",
     "emergencyContactName": "李先生",
     "emergencyContactPhone": "13800000000"
   },
-  "reminders": [],
-  "conversations": [],
-  "events": []
+  "settings": {
+    "autoSpeak": true,
+    "largeText": true,
+    "reminderVoice": true
+  },
+  "reminders": [
+    {
+      "id": "rem_1773211604858_sudo83",
+      "title": "吃药",
+      "time": "08:00",
+      "repeat": "daily",
+      "scheduleDate": "",
+      "enabled": true,
+      "lastTriggeredAt": "",
+      "lastTriggeredDate": "",
+      "createdAt": "2026-03-11T06:46:44.858Z"
+    }
+  ],
+  "conversations": [
+    {
+      "id": "chat_1773211604858_quup6k",
+      "role": "user",
+      "content": "每天早上 8 点提醒我吃药",
+      "source": "text",
+      "createdAt": "2026-03-11T06:46:44.858Z"
+    },
+    {
+      "id": "chat_1773211604858_jf4r2g",
+      "role": "assistant",
+      "content": "好的，我已经为您设置提醒：每天 08:00 提醒您吃药。到点后我会主动播报。",
+      "source": "system",
+      "createdAt": "2026-03-11T06:46:44.858Z"
+    },
+    {
+      "id": "chat_1773211604876_twdbj2",
+      "role": "user",
+      "content": "我现在胸痛，快不行了",
+      "source": "text",
+      "createdAt": "2026-03-11T06:46:44.876Z"
+    },
+    {
+      "id": "chat_1773211604876_epo8jb",
+      "role": "assistant",
+      "content": "我检测到您可能正处于紧急状态，请立刻拨打 120，并联系李先生。 您现在的登记地址是 上海市浦东新区示例路 18 号 2 单元。我会把求助步骤放在屏幕上，您按顺序操作即可。",
+      "source": "system",
+      "createdAt": "2026-03-11T06:46:44.876Z"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt_1773211604876_ecsdko",
+      "type": "emergency_cardio",
+      "level": "high",
+      "message": "系统识别到高风险表达：我现在胸痛，快不行了",
+      "meta": {
+        "source": "text",
+        "label": "疑似胸痛或呼吸困难",
+        "steps": [
+          "立即拨打 120 并说明地址与症状",
+          "保持坐姿或半卧位，不要独自走动",
+          "联系紧急联系人尽快到场"
+        ]
+      },
+      "createdAt": "2026-03-11T06:46:44.876Z"
+    },
+    {
+      "id": "evt_1773211604858_r811fv",
+      "type": "reminder_created",
+      "level": "normal",
+      "message": "语音创建提醒：吃药",
+      "meta": {
+        "reminderId": "rem_1773211604858_sudo83",
+        "source": "text",
+        "time": "08:00",
+        "repeat": "daily",
+        "scheduleDate": ""
+      },
+      "createdAt": "2026-03-11T06:46:44.858Z"
+    }
+  ]
 }

@@ -3,145 +3,242 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#28544f" />
     <title>老人陪伴助手</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="bg-shape bg-shape-a"></div>
-    <div class="bg-shape bg-shape-b"></div>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="ambient ambient-c"></div>
 
     <div class="app-shell">
       <header class="hero">
-        <p class="hero-kicker">老人陪伴助手</p>
-        <h1>开口就能用的陪伴与求助</h1>
-        <p id="hero-status" class="hero-status">已连接服务</p>
+        <div class="hero-top">
+          <div>
+            <p class="hero-kicker">老人陪伴助手</p>
+            <h1>开口就能用的陪伴与生活守护</h1>
+            <p id="hero-status" class="hero-status">正在连接服务...</p>
+          </div>
+          <button id="hero-sos" class="sos-btn" type="button">一键求助</button>
+        </div>
+
+        <div class="hero-grid">
+          <article class="hero-stat">
+            <span>下一条提醒</span>
+            <strong id="hero-next-reminder">加载中</strong>
+          </article>
+          <article class="hero-stat">
+            <span>紧急联系人</span>
+            <strong id="hero-contact-name">加载中</strong>
+          </article>
+          <article class="hero-stat">
+            <span>地址信息</span>
+            <strong id="hero-address">未设置</strong>
+          </article>
+          <article class="hero-stat">
+            <span>语音播报</span>
+            <strong id="hero-voice-mode">已开启</strong>
+          </article>
+        </div>
       </header>
 
       <main class="panel-container">
         <section id="panel-chat" class="panel active" aria-label="对话面板">
-          <div class="panel-head">
-            <h2>语音陪聊</h2>
-            <p>语音为主，文字为辅</p>
+          <div class="section-card intro-card">
+            <div class="panel-head">
+              <h2>陪伴对话</h2>
+              <p>语音优先，步骤简短，适合手机直接使用</p>
+            </div>
+            <div id="quick-actions" class="quick-actions"></div>
           </div>
 
           <div id="chat-list" class="chat-list" aria-live="polite"></div>
 
-          <div class="voice-box">
-            <button id="voice-btn" class="voice-btn" type="button">按此开始语音</button>
-            <p id="voice-status" class="voice-status">语音待命</p>
-          </div>
+          <div class="section-card composer-card">
+            <div class="voice-box">
+              <button id="voice-btn" class="voice-btn" type="button">按此开始语音</button>
+              <p id="voice-status" class="voice-status">语音待命</p>
+            </div>
 
-          <form id="chat-form" class="chat-form">
-            <input
-              id="chat-input"
-              type="text"
-              inputmode="text"
-              placeholder="输入内容，例如：每天 8:00 提醒我吃药"
-              autocomplete="off"
-            />
-            <button type="submit">发送</button>
-          </form>
+            <form id="chat-form" class="chat-form">
+              <label class="sr-only" for="chat-input">输入对话内容</label>
+              <textarea
+                id="chat-input"
+                rows="2"
+                maxlength="200"
+                placeholder="例如：每天早上 8 点提醒我吃药"
+              ></textarea>
+              <div class="composer-actions">
+                <button type="submit" class="primary-btn">发送</button>
+                <button id="chat-clear" type="button" class="ghost-btn">清空</button>
+              </div>
+            </form>
+          </div>
         </section>
 
         <section id="panel-reminder" class="panel" aria-label="提醒面板">
-          <div class="panel-head">
-            <h2>提醒管理</h2>
-            <p>吃药、喝水、复诊都可设置</p>
+          <div class="section-card">
+            <div class="panel-head">
+              <h2>提醒管理</h2>
+              <p>吃药、喝水、复诊都可以通过语音或手动添加</p>
+            </div>
+            <div id="today-reminders" class="agenda-list"></div>
           </div>
 
-          <form id="reminder-form" class="stack-form">
+          <form id="reminder-form" class="section-card stack-form">
             <label>
               提醒内容
               <input id="reminder-title" type="text" required maxlength="40" placeholder="例如：吃降压药" />
             </label>
-            <label>
-              时间
-              <input id="reminder-time" type="time" required />
-            </label>
-            <label>
-              频率
-              <select id="reminder-repeat">
-                <option value="daily">每天</option>
-                <option value="once">仅一次</option>
-              </select>
-            </label>
-            <button type="submit">添加提醒</button>
+            <div class="two-col">
+              <label>
+                时间
+                <input id="reminder-time" type="time" required />
+              </label>
+              <label>
+                频率
+                <select id="reminder-repeat">
+                  <option value="daily">每天</option>
+                  <option value="once">仅一次</option>
+                </select>
+              </label>
+            </div>
+            <div id="once-date-wrap" class="hidden">
+              <label>
+                日期
+                <input id="reminder-date" type="date" />
+              </label>
+            </div>
+            <button type="submit" class="primary-btn">添加提醒</button>
           </form>
 
-          <div id="reminder-list" class="reminder-list"></div>
+          <div id="reminder-list" class="stack-list"></div>
         </section>
 
         <section id="panel-profile" class="panel" aria-label="资料面板">
-          <div class="panel-head">
-            <h2>我的资料</h2>
-            <p>最小化信息，便于紧急联系</p>
-          </div>
+          <form id="profile-form" class="section-card stack-form">
+            <div class="panel-head">
+              <h2>我的资料</h2>
+              <p>保留最小必要信息，便于个性化陪伴与紧急联络</p>
+            </div>
 
-          <form id="profile-form" class="stack-form">
+            <div class="two-col">
+              <label>
+                称呼
+                <input id="profile-name" type="text" maxlength="30" placeholder="例如：王阿姨" />
+              </label>
+              <label>
+                年龄
+                <input id="profile-age" type="text" maxlength="10" placeholder="例如：68" />
+              </label>
+            </div>
+
             <label>
-              称呼
-              <input id="profile-name" type="text" maxlength="30" placeholder="例如：王阿姨" />
+              日常偏好
+              <textarea id="profile-preferences" rows="2" maxlength="200" placeholder="例如：戏曲、散步、孙女"></textarea>
             </label>
             <label>
-              年龄
-              <input id="profile-age" type="text" maxlength="10" placeholder="例如：68" />
+              备注信息
+              <textarea id="profile-notes" rows="3" maxlength="300" placeholder="慢病、常用药、特殊提醒等"></textarea>
             </label>
             <label>
-              偏好
-              <textarea id="profile-preferences" rows="2" maxlength="200" placeholder="例如：戏曲、散步"></textarea>
+              常住地址
+              <textarea id="profile-address" rows="2" maxlength="120" placeholder="例如：上海市浦东新区示例路 18 号 2 单元"></textarea>
             </label>
-            <label>
-              备注
-              <textarea id="profile-notes" rows="2" maxlength="300" placeholder="慢病、注意事项等"></textarea>
-            </label>
-            <label>
-              紧急联系人
-              <input id="profile-contact-name" type="text" maxlength="30" placeholder="姓名" />
-            </label>
-            <label>
-              联系电话
-              <input id="profile-contact-phone" type="tel" maxlength="20" placeholder="手机号" />
-            </label>
-            <button type="submit">保存资料</button>
+
+            <div class="two-col">
+              <label>
+                紧急联系人
+                <input id="profile-contact-name" type="text" maxlength="30" placeholder="姓名" />
+              </label>
+              <label>
+                联系电话
+                <input id="profile-contact-phone" type="tel" maxlength="20" placeholder="手机号" />
+              </label>
+            </div>
+
+            <div class="settings-grid">
+              <label class="switch-row">
+                <span>回复语音播报</span>
+                <input id="settings-auto-speak" type="checkbox" />
+              </label>
+              <label class="switch-row">
+                <span>大字模式</span>
+                <input id="settings-large-text" type="checkbox" />
+              </label>
+              <label class="switch-row">
+                <span>提醒播报</span>
+                <input id="settings-reminder-voice" type="checkbox" />
+              </label>
+            </div>
+
+            <button type="submit" class="primary-btn">保存资料与设置</button>
           </form>
         </section>
 
         <section id="panel-family" class="panel" aria-label="家属面板">
-          <div class="panel-head">
-            <h2>家属查看</h2>
-            <p>关键记录可追溯</p>
+          <div class="section-card">
+            <div class="panel-head">
+              <h2>家属查看</h2>
+              <p>对话、提醒和紧急事件都可以追溯</p>
+            </div>
+
+            <div class="summary-grid">
+              <article>
+                <p class="summary-key">累计对话</p>
+                <p id="sum-chat" class="summary-value">-</p>
+              </article>
+              <article>
+                <p class="summary-key">7天紧急事件</p>
+                <p id="sum-emergency" class="summary-value danger">-</p>
+              </article>
+              <article>
+                <p class="summary-key">7天提醒触发</p>
+                <p id="sum-reminder" class="summary-value">-</p>
+              </article>
+              <article>
+                <p class="summary-key">启用中的提醒</p>
+                <p id="sum-enabled" class="summary-value">-</p>
+              </article>
+              <article>
+                <p class="summary-key">下一条提醒</p>
+                <p id="sum-next" class="summary-text">-</p>
+              </article>
+              <article>
+                <p class="summary-key">最近高风险事件</p>
+                <p id="sum-last-emergency" class="summary-text">-</p>
+              </article>
+            </div>
           </div>
 
-          <div class="summary-grid">
-            <article>
-              <p class="summary-key">对话次数</p>
-              <p id="sum-chat" class="summary-value">-</p>
-            </article>
-            <article>
-              <p class="summary-key">7天紧急事件</p>
-              <p id="sum-emergency" class="summary-value">-</p>
-            </article>
-            <article>
-              <p class="summary-key">7天提醒事件</p>
-              <p id="sum-reminder" class="summary-value">-</p>
-            </article>
-            <article>
-              <p class="summary-key">已启用提醒</p>
-              <p id="sum-enabled" class="summary-value">-</p>
-            </article>
+          <div id="family-alert" class="alert-card">
+            <p class="alert-kicker">照护提示</p>
+            <h3>暂无高风险告警</h3>
+            <p>如果检测到胸痛、摔倒、救命等表达，这里会优先提示。</p>
           </div>
 
           <div class="inline-tools">
             <select id="log-type">
-              <option value="all">全部</option>
+              <option value="all">全部类型</option>
               <option value="conversation">对话</option>
               <option value="reminder">提醒</option>
               <option value="emergency">紧急</option>
+              <option value="profile">资料设置</option>
             </select>
-            <button id="refresh-logs" type="button">刷新记录</button>
+            <select id="log-level">
+              <option value="all">全部等级</option>
+              <option value="high">高风险</option>
+              <option value="normal">普通</option>
+              <option value="info">信息</option>
+            </select>
+            <input id="log-search" type="search" placeholder="搜索关键记录" />
+            <button id="refresh-logs" type="button" class="ghost-btn">刷新记录</button>
           </div>
 
-          <div id="log-list" class="log-list"></div>
+          <div id="log-list" class="stack-list"></div>
         </section>
       </main>
 
@@ -153,21 +250,18 @@
       </nav>
     </div>
 
-    <div id="emergency-modal" class="emergency-modal hidden" role="dialog" aria-modal="true">
+    <div id="emergency-modal" class="emergency-modal hidden" role="dialog" aria-modal="true" aria-labelledby="emergency-title">
       <div class="emergency-card">
         <p class="emergency-tag">紧急模式</p>
-        <h3>检测到高风险表达</h3>
-        <p>请先保持安全体位，然后按顺序执行：</p>
-        <ol>
-          <li>立即拨打 120，说明地址与症状。</li>
-          <li>联系紧急联系人，请求到场协助。</li>
-          <li>保持语音沟通，等待帮助到达。</li>
-        </ol>
+        <h3 id="emergency-title">检测到高风险表达</h3>
+        <p id="emergency-summary">请先保持安全体位，然后按顺序执行下列步骤。</p>
+        <ul id="emergency-steps" class="emergency-steps"></ul>
         <div class="emergency-actions">
           <a id="call-120" href="tel:120">拨打 120</a>
           <a id="call-contact" href="#">联系紧急联系人</a>
         </div>
-        <button id="close-emergency" type="button">我已处理，关闭弹窗</button>
+        <button id="report-emergency" type="button" class="ghost-btn danger-outline">我已向家人求助</button>
+        <button id="close-emergency" type="button" class="primary-btn">关闭弹窗</button>
       </div>
     </div>
 

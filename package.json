@@ -1,10 +1,11 @@
 {
   "name": "elderly-companion-assistant",
-  "version": "1.0.0",
-  "description": "手机 Web 端老人陪伴助手 MVP",
+  "version": "1.1.0",
+  "description": "面向老年人的手机 Web 陪伴、提醒与紧急求助助手",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"
