@@ -9,6 +9,12 @@ const state = {
   logs: [],
   conversations: [],
   dashboard: {},
+  ai: {
+    chatConfigured: false,
+    chatProviderLabel: "本地规则回复",
+    asrLabel: "浏览器语音识别",
+    ttsLabel: "浏览器语音播报",
+  },
   quickActions: ["陪我聊聊天", "每天早上 8 点提醒我吃药", "查看今日安排", "联系紧急联系人"],
   activeEmergency: null,
 };
@@ -427,6 +433,10 @@ function closeEmergencyModal() {
 
 async function refreshOverview() {
   const data = await api("/api/bootstrap");
+  state.ai = {
+    ...state.ai,
+    ...(data.ai || {}),
+  };
   state.profile = data.profile || {};
   state.settings = {
     ...state.settings,
@@ -727,8 +737,9 @@ async function boot() {
   updateRepeatDateVisibility();
 
   try {
-    await api("/api/health");
-    setHeroStatus("服务已连接，可直接开始使用");
+    const health = await api("/api/health");
+    const chatLabel = health?.ai?.chatConfigured ? `${health.ai.chatProviderLabel} 已启用` : "当前使用本地对话回复";
+    setHeroStatus(`${chatLabel}，语音输入/播报使用浏览器能力`);
   } catch {
     setHeroStatus("服务不可用，请检查后端是否已启动", true);
   }
@@ -736,6 +747,9 @@ async function boot() {
   try {
     await refreshOverview();
     renderQuickActions(state.quickActions);
+    if (state.ai?.chatConfigured) {
+      setHeroStatus(`${state.ai.chatProviderLabel} 已启用，ASR/TTS 使用浏览器能力`);
+    }
   } catch (error) {
     showToast(error.message || "初始化失败");
   }

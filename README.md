@@ -5,6 +5,7 @@
 ## 核心能力
 - 语音优先：浏览器语音识别 + 语音播报，老人打开手机浏览器即可使用。
 - 陪伴对话：围绕问候、孤独情绪、提醒需求、联系家人等常见场景给出简短回复。
+- 大模型对话：支持通过环境变量接入 DeepSeek，对普通闲聊和陪伴对话优先走大模型，异常时自动回退本地规则。
 - 提醒闭环：支持手动创建提醒，也支持自然语言直接创建，例如“每天早上 8 点提醒我吃药”。
 - 紧急求助：识别胸痛、摔倒、救命、昏迷等高风险表达，自动弹出求助流程并留痕。
 - 家属视图：提供统计概览、筛选日志、最近高风险事件提示。
@@ -31,6 +32,38 @@ npm start
 1. 服务器与手机在同一网络。
 2. 使用服务器 IP 访问，例如 `http://192.168.1.20:3000`。
 3. 云服务器需开放对应安全组端口。
+
+## DeepSeek 接入
+不需要改代码，只需要在启动前设置环境变量：
+
+```bash
+cd /root/kkk/项目
+export DEEPSEEK_API_KEY="你的密钥"
+export DEEPSEEK_MODEL="deepseek-chat"
+npm start
+```
+
+可选环境变量：
+- `DEEPSEEK_API_KEY`：DeepSeek API Key
+- `DEEPSEEK_MODEL`：默认 `deepseek-chat`
+- `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`
+- `DEEPSEEK_TIMEOUT_MS`：默认 `15000`
+
+接入后：
+- 普通陪伴聊天优先走 DeepSeek
+- 提醒创建、紧急识别仍由本地规则优先处理，保证稳定性和安全性
+- 如果 DeepSeek 接口异常，系统会自动回退到本地回复
+
+## TTS / ASR 说明
+当前项目已经具备：
+- `ASR`：浏览器 Web Speech API 语音识别
+- `TTS`：浏览器 Speech Synthesis 语音播报
+
+这意味着你现在就可以直接进行“语音输入 + 文本/语音回复”的对话。
+
+注意：
+- DeepSeek 官方公开文档当前主要是聊天/补全接口，本项目没有直接把 DeepSeek 当作 TTS/ASR 提供方使用。
+- 如果你要“云端 ASR/TTS”，下一步可以再接阿里云、火山、腾讯、讯飞或 OpenAI 等语音服务。
 
 ## 常用脚本
 ```bash

@@ -35,6 +35,20 @@ npm start
 HOST=0.0.0.0 PORT=3000 npm start
 ```
 
+如果要启用 DeepSeek：
+```bash
+HOST=0.0.0.0 \
+PORT=3000 \
+DEEPSEEK_API_KEY="你的密钥" \
+DEEPSEEK_MODEL="deepseek-chat" \
+npm start
+```
+
+说明：
+- 普通聊天会优先走 DeepSeek
+- 提醒创建和紧急识别仍由本地逻辑处理
+- TTS/ASR 当前使用浏览器原生能力，不依赖 DeepSeek
+
 ## 6. systemd 服务
 创建文件：
 ```bash
@@ -53,6 +67,8 @@ WorkingDirectory=/opt/elderly-companion-assistant
 Environment=NODE_ENV=production
 Environment=HOST=0.0.0.0
 Environment=PORT=3000
+Environment=DEEPSEEK_API_KEY=your_key_here
+Environment=DEEPSEEK_MODEL=deepseek-chat
 ExecStart=/usr/bin/node /opt/elderly-companion-assistant/server.js
 Restart=always
 RestartSec=3

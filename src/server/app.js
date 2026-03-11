@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs/promises");
 const path = require("path");
 const { URL } = require("url");
+const { aiCapabilities, createDeepSeekReply, isDeepSeekEnabled } = require("./ai");
 const { APP_NAME, APP_VERSION, DEFAULT_DATA_FILE, MAX_BODY_SIZE, WEB_DIR } = require("./config");
 const {
   addEvent,
@@ -114,6 +115,7 @@ function sortedReminders(reminders, now = new Date()) {
 function buildBootstrapPayload(store, now = new Date()) {
   const dashboard = buildDashboard(store, now);
   return {
+    ai: aiCapabilities(),
     profile: store.profile,
     settings: store.settings,
     reminders: sortedReminders(store.reminders, now),
@@ -178,6 +180,7 @@ async function handleApi(req, res, urlObj, options) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
+      ai: aiCapabilities(),
       now: new Date().toISOString(),
       uptimeSec: Math.round(process.uptime()),
     });
@@ -410,12 +413,14 @@ async function handleApi(req, res, urlObj, options) {
       async (store) => {
         const emergency = detectEmergency(message);
         const reminderIntent = emergency ? null : parseReminderIntent(message);
-        const assistant = buildAssistantResponse({
+        const fallbackAssistant = buildAssistantResponse({
           message,
           profile: store.profile,
           reminderIntent,
           emergency,
         });
+        let assistant = fallbackAssistant;
+        let replyProvider = "local-rule";
 
         const userMessage = {
           id: createId("chat"),
@@ -424,18 +429,6 @@ async function handleApi(req, res, urlObj, options) {
           source,
           createdAt: new Date().toISOString(),
         };
-        const assistantMessage = {
-          id: createId("chat"),
-          role: "assistant",
-          content: assistant.reply,
-          source: "system",
-          createdAt: new Date().toISOString(),
-        };
-
-        store.conversations.push(userMessage, assistantMessage);
-        if (store.conversations.length > 400) {
-          store.conversations.splice(0, store.conversations.length - 400);
-        }
 
         let createdReminder = null;
         if (reminderIntent) {
@@ -462,14 +455,63 @@ async function handleApi(req, res, urlObj, options) {
         }
 
         if (emergency) {
-          addEvent(store, emergency.type, `系统识别到高风险表达：${message.slice(0, 60)}`, {
-            source,
-            label: emergency.label,
-            steps: emergency.steps,
-          }, "high");
+          addEvent(
+            store,
+            emergency.type,
+            `系统识别到高风险表达：${message.slice(0, 60)}`,
+            {
+              source,
+              label: emergency.label,
+              steps: emergency.steps,
+            },
+            "high"
+          );
+        } else if (!reminderIntent && isDeepSeekEnabled()) {
+          try {
+            const aiReply = await createDeepSeekReply({
+              history: recentConversations(store, 10),
+              message,
+              profile: store.profile,
+            });
+
+            if (aiReply?.reply) {
+              assistant = {
+                ...fallbackAssistant,
+                reply: aiReply.reply,
+                intent: "llm_chat",
+                suggestions: ["继续聊聊天", "帮我设置提醒", "联系紧急联系人"],
+              };
+              replyProvider = aiReply.provider || "deepseek";
+            }
+          } catch (error) {
+            addEvent(
+              store,
+              "ai_fallback",
+              "DeepSeek 暂时不可用，已自动回退到本地回复",
+              {
+                provider: "deepseek",
+                reason: error instanceof Error ? error.message.slice(0, 160) : "unknown",
+              },
+              "info"
+            );
+          }
+        }
+
+        const assistantMessage = {
+          id: createId("chat"),
+          role: "assistant",
+          content: assistant.reply,
+          source: replyProvider,
+          createdAt: new Date().toISOString(),
+        };
+
+        store.conversations.push(userMessage, assistantMessage);
+        if (store.conversations.length > 400) {
+          store.conversations.splice(0, store.conversations.length - 400);
         }
 
         responsePayload = {
+          provider: replyProvider,
           reply: assistant.reply,
           intent: assistant.intent,
           suggestions: assistant.suggestions,
@@ -483,6 +525,7 @@ async function handleApi(req, res, urlObj, options) {
               }
             : null,
           reminder: createdReminder ? decorateReminder(createdReminder) : null,
+          ai: aiCapabilities(),
         };
       },
       dataFile
