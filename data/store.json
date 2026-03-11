@@ -15,6 +15,105 @@
     "reminderVoice": true
   },
   "reminders": [],
-  "conversations": [],
+  "conversations": [
+    {
+      "id": "chat_1773219040479_2de30a",
+      "role": "user",
+      "content": "你好",
+      "source": "text",
+      "createdAt": "2026-03-11T08:50:40.479Z"
+    },
+    {
+      "id": "chat_1773219042465_llz9q5",
+      "role": "assistant",
+      "content": "王阿姨您好呀，我是来陪您聊天的小孙子。您今天感觉怎么样呀？",
+      "source": "deepseek",
+      "createdAt": "2026-03-11T08:50:42.465Z"
+    },
+    {
+      "id": "chat_1773219065966_giiben",
+      "role": "user",
+      "content": "今天有什么好玩的新闻或笑话吗？",
+      "source": "text",
+      "createdAt": "2026-03-11T08:51:05.966Z"
+    },
+    {
+      "id": "chat_1773219065966_0m1pt5",
+      "role": "assistant",
+      "content": "有呀！今天有不少暖心消息，比如社区活动和便民服务。我也可以先给您讲个轻松的小笑话，陪您乐一乐，您想先听新闻还是笑话？",
+      "source": "local-knowledge",
+      "createdAt": "2026-03-11T08:51:05.966Z"
+    },
+    {
+      "id": "chat_1773219077115_dky8br",
+      "role": "user",
+      "content": "讲一个笑话谢谢",
+      "source": "text",
+      "createdAt": "2026-03-11T08:51:17.115Z"
+    },
+    {
+      "id": "chat_1773219079563_bi6dnm",
+      "role": "assistant",
+      "content": "好嘞！有个老爷爷去买菜，问老板：这菜新鲜吗？老板说：您看这水灵灵的，早上刚摘的！老爷爷说：可我看着像昨天的。老板说：不可能，我天天在这卖，昨天没出摊！哈哈，您笑了吗？",
+      "source": "deepseek",
+      "createdAt": "2026-03-11T08:51:19.563Z"
+    },
+    {
+      "id": "chat_1773219422477_4onzcu",
+      "role": "user",
+      "content": "我肚子有点不舒服",
+      "source": "text",
+      "createdAt": "2026-03-11T08:57:02.477Z"
+    },
+    {
+      "id": "chat_1773219424458_7eft44",
+      "role": "assistant",
+      "content": "肚子不舒服啊，您先别急，找个地方坐下休息会儿。是哪种不舒服呢，是胀还是疼？",
+      "source": "deepseek",
+      "createdAt": "2026-03-11T08:57:04.458Z"
+    },
+    {
+      "id": "chat_1773219441407_yc2ve0",
+      "role": "user",
+      "content": "我头很晕",
+      "source": "text",
+      "createdAt": "2026-03-11T08:57:21.407Z"
+    },
+    {
+      "id": "chat_1773219443638_v7mxh3",
+      "role": "assistant",
+      "content": "头晕可别大意，您先扶稳坐好，别走动。您今天按时吃降压药了吗？要不要我帮您联系一下家人？",
+      "source": "deepseek",
+      "createdAt": "2026-03-11T08:57:23.638Z"
+    },
+    {
+      "id": "chat_1773219461931_yqf55d",
+      "role": "user",
+      "content": "帮我联系家人",
+      "source": "text",
+      "createdAt": "2026-03-11T08:57:41.931Z"
+    },
+    {
+      "id": "chat_1773219463750_adisgq",
+      "role": "assistant",
+      "content": "好的，我这就帮您联系李先生。您先坐着别动，保持平稳呼吸。",
+      "source": "deepseek",
+      "createdAt": "2026-03-11T08:57:43.750Z"
+    },
+    {
+      "id": "chat_1773219510445_8e85h5",
+      "role": "user",
+      "content": "肚子很疼",
+      "source": "text",
+      "createdAt": "2026-03-11T08:58:30.445Z"
+    },
+    {
+      "id": "chat_1773219512599_8vbct9",
+      "role": "assistant",
+      "content": "肚子疼得厉害可别硬撑，您先躺下或坐着别动。我马上帮您联系李先生，让他带您去医院看看。",
+      "source": "deepseek",
+      "createdAt": "2026-03-11T08:58:32.599Z"
+    }
+  ],
   "events": []
 }

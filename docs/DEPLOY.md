@@ -44,10 +44,26 @@ DEEPSEEK_MODEL="deepseek-chat" \
 npm start
 ```
 
+如果还要启用云端 ASR / TTS：
+```bash
+HOST=0.0.0.0 \
+PORT=3000 \
+DEEPSEEK_API_KEY="你的 DeepSeek 密钥" \
+DEEPSEEK_MODEL="deepseek-chat" \
+OPENAI_API_KEY="你的语音服务密钥" \
+OPENAI_BASE_URL="https://api.openai.com/v1" \
+OPENAI_ASR_MODEL="gpt-4o-mini-transcribe" \
+OPENAI_TTS_MODEL="gpt-4o-mini-tts" \
+OPENAI_TTS_VOICE="alloy" \
+npm start
+```
+
 说明：
 - 普通聊天会优先走 DeepSeek
 - 提醒创建和紧急识别仍由本地逻辑处理
-- TTS/ASR 当前使用浏览器原生能力，不依赖 DeepSeek
+- Prompt 会从 `config/agent-prompt.json` 动态读取，可按场景调整
+- 如配置 `OPENAI_*` 语音环境变量，手机端语音会优先走云端 ASR / TTS
+- 云端语音失败时，浏览器播报会自动兜底
 
 ## 6. systemd 服务
 创建文件：
@@ -69,6 +85,11 @@ Environment=HOST=0.0.0.0
 Environment=PORT=3000
 Environment=DEEPSEEK_API_KEY=your_key_here
 Environment=DEEPSEEK_MODEL=deepseek-chat
+Environment=OPENAI_API_KEY=your_speech_key_here
+Environment=OPENAI_BASE_URL=https://api.openai.com/v1
+Environment=OPENAI_ASR_MODEL=gpt-4o-mini-transcribe
+Environment=OPENAI_TTS_MODEL=gpt-4o-mini-tts
+Environment=OPENAI_TTS_VOICE=alloy
 ExecStart=/usr/bin/node /opt/elderly-companion-assistant/server.js
 Restart=always
 RestartSec=3
@@ -123,6 +144,7 @@ sudo certbot --nginx -d your-domain.com
 ## 10. 运行检查
 ```bash
 curl http://127.0.0.1:3000/api/health
+curl http://127.0.0.1:3000/api/ai/prompt
 ```
 
 返回 `ok: true` 即表示服务可用。

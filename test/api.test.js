@@ -44,12 +44,43 @@ test("health and bootstrap endpoints should be available", async () => {
     const health = await ctx.request("/api/health");
     assert.equal(health.response.status, 200);
     assert.equal(health.data.ok, true);
+    assert.equal(typeof health.data.ai.promptProfile, "string");
 
     const bootstrap = await ctx.request("/api/bootstrap");
     assert.equal(bootstrap.response.status, 200);
     assert.ok(bootstrap.data.profile);
+    assert.equal(typeof bootstrap.data.experience.welcomeMessage, "string");
+    assert.ok(Array.isArray(bootstrap.data.experience.quickActions));
     assert.ok(Array.isArray(bootstrap.data.reminders));
     assert.ok(Array.isArray(bootstrap.data.logs));
+    assert.equal(typeof bootstrap.data.ai.promptProfile, "string");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("prompt and speech capability endpoints should be available", async () => {
+  const ctx = await startServer();
+  try {
+    const prompt = await ctx.request("/api/ai/prompt");
+    assert.equal(prompt.response.status, 200);
+    assert.equal(typeof prompt.data.prompt.meta.name, "string");
+    assert.equal(typeof prompt.data.experience.welcomeMessage, "string");
+    assert.ok(Array.isArray(prompt.data.prompt.scenes));
+
+    const transcribe = await ctx.request("/api/speech/transcribe", {
+      method: "POST",
+      body: JSON.stringify({ audioBase64: "ZmFrZQ==" }),
+    });
+    assert.equal(transcribe.response.status, 503);
+    assert.match(transcribe.data.error, /云端语音识别未配置/);
+
+    const speak = await ctx.request("/api/speech/speak", {
+      method: "POST",
+      body: JSON.stringify({ text: "你好" }),
+    });
+    assert.equal(speak.response.status, 503);
+    assert.match(speak.data.error, /云端语音播报未配置/);
   } finally {
     await ctx.close();
   }

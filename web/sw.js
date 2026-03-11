@@ -1,4 +1,4 @@
-const CACHE_NAME = "elderly-companion-v1";
+const CACHE_NAME = "elderly-companion-v3";
 const SHELL_FILES = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

@@ -4,6 +4,9 @@ const path = require("path");
 const { URL } = require("url");
 const { aiCapabilities, createDeepSeekReply, isDeepSeekEnabled } = require("./ai");
 const { APP_NAME, APP_VERSION, DEFAULT_DATA_FILE, MAX_BODY_SIZE, WEB_DIR } = require("./config");
+const { findBestKnowledgeMatch, getAssistantExperience, knowledgeReply } = require("./knowledge");
+const { getPromptProfileView } = require("./prompt");
+const { isCloudAsrEnabled, isCloudTtsEnabled, synthesizeSpeech, transcribeAudio } = require("./speech");
 const {
   addEvent,
   buildAssistantResponse,
@@ -72,6 +75,18 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.end(body);
 }
 
+function sendBuffer(res, statusCode, buffer, contentType, extraHeaders = {}) {
+  res.writeHead(statusCode, {
+    ...baseSecurityHeaders,
+    "Content-Type": contentType,
+    "Content-Length": buffer.length,
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": contentSecurityPolicy,
+    ...extraHeaders,
+  });
+  res.end(buffer);
+}
+
 function sendError(res, statusCode, message, details) {
   sendJson(res, statusCode, {
     error: message,
@@ -116,6 +131,7 @@ function buildBootstrapPayload(store, now = new Date()) {
   const dashboard = buildDashboard(store, now);
   return {
     ai: aiCapabilities(),
+    experience: getAssistantExperience(),
     profile: store.profile,
     settings: store.settings,
     reminders: sortedReminders(store.reminders, now),
@@ -190,6 +206,45 @@ async function handleApi(req, res, urlObj, options) {
   if (method === "GET" && pathname === "/api/bootstrap") {
     const store = await readStore(dataFile);
     sendJson(res, 200, buildBootstrapPayload(store));
+    return true;
+  }
+
+  if (method === "GET" && pathname === "/api/ai/prompt") {
+    sendJson(res, 200, {
+      prompt: getPromptProfileView(),
+      experience: getAssistantExperience(),
+      ai: aiCapabilities(),
+    });
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/speech/transcribe") {
+    if (!isCloudAsrEnabled()) {
+      sendError(res, 503, "云端语音识别未配置");
+      return true;
+    }
+    const body = await parseBody(req);
+    const result = await transcribeAudio({
+      audioBase64: body.audioBase64,
+      mimeType: body.mimeType,
+      fileName: body.fileName,
+    });
+    sendJson(res, 200, result);
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/speech/speak") {
+    if (!isCloudTtsEnabled()) {
+      sendError(res, 503, "云端语音播报未配置");
+      return true;
+    }
+    const body = await parseBody(req);
+    const speech = await synthesizeSpeech(body.text);
+    sendBuffer(res, 200, speech.buffer, speech.contentType, {
+      "Content-Disposition": `inline; filename="${speech.fileName}"`,
+      "X-Speech-Provider": speech.provider,
+      "X-Speech-Model": speech.model,
+    });
     return true;
   }
 
@@ -413,14 +468,18 @@ async function handleApi(req, res, urlObj, options) {
       async (store) => {
         const emergency = detectEmergency(message);
         const reminderIntent = emergency ? null : parseReminderIntent(message);
-        const fallbackAssistant = buildAssistantResponse({
+        const bestKnowledgeMatch = emergency || reminderIntent ? null : findBestKnowledgeMatch(message);
+        const knowledgeAssistant = knowledgeReply(bestKnowledgeMatch);
+        const fallbackAssistant =
+          knowledgeAssistant ||
+          buildAssistantResponse({
           message,
           profile: store.profile,
           reminderIntent,
           emergency,
-        });
+          });
         let assistant = fallbackAssistant;
-        let replyProvider = "local-rule";
+        let replyProvider = knowledgeAssistant ? "local-knowledge" : "local-rule";
 
         const userMessage = {
           id: createId("chat"),
@@ -466,7 +525,7 @@ async function handleApi(req, res, urlObj, options) {
             },
             "high"
           );
-        } else if (!reminderIntent && isDeepSeekEnabled()) {
+        } else if (!reminderIntent && !knowledgeAssistant && isDeepSeekEnabled()) {
           try {
             const aiReply = await createDeepSeekReply({
               history: recentConversations(store, 10),
@@ -479,7 +538,10 @@ async function handleApi(req, res, urlObj, options) {
                 ...fallbackAssistant,
                 reply: aiReply.reply,
                 intent: "llm_chat",
-                suggestions: ["继续聊聊天", "帮我设置提醒", "联系紧急联系人"],
+                suggestions:
+                  Array.isArray(aiReply.suggestions) && aiReply.suggestions.length
+                    ? aiReply.suggestions
+                    : ["继续聊聊天", "帮我设置提醒", "联系紧急联系人"],
               };
               replyProvider = aiReply.provider || "deepseek";
             }

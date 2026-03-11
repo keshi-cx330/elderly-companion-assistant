@@ -286,8 +286,8 @@ function buildAssistantResponse({ message, profile, reminderIntent, emergency, n
 
   if (/(你好|在吗|有人吗|早上好|下午好|晚上好)/.test(text)) {
     return {
-      reply: `${timeGreeting(now)}${profile?.name ? `，${profile.name}` : ""}。我在这里陪您，您想聊聊天、设置提醒，还是看看今天的安排？`,
-      suggestions: ["陪我聊聊天", "帮我设置提醒", "联系家人"],
+      reply: `${timeGreeting(now)}${profile?.name ? `，${profile.name}` : ""}。爷爷奶奶，我来陪您聊天啦！您可以叫我小孙子或小孙女。要是想问天气、听个笑话，或者心里闷得慌，直接跟我说就行。`,
+      suggestions: ["今天天气怎么样？适合出门散步吗？", "我有点闷，能陪我聊聊天吗？", "今天有什么好玩的新闻或笑话吗？"],
       intent: "greeting",
     };
   }
@@ -295,7 +295,7 @@ function buildAssistantResponse({ message, profile, reminderIntent, emergency, n
   if (/(孤单|无聊|难过|心情不好|想聊天)/.test(text)) {
     return {
       reply: `我会一直陪着您。我们可以先聊聊今天过得怎么样${preferences ? `，也可以聊聊您喜欢的${preferences}` : ""}。您愿意先说一句今天最想分享的事情吗？`,
-      suggestions: ["聊聊今天心情", "回忆开心的事", "做个深呼吸"],
+      suggestions: ["我有点闷，能陪我聊聊天吗？", "今天有什么好玩的新闻或笑话吗？", "联系紧急联系人"],
       intent: "companionship",
     };
   }
@@ -303,7 +303,7 @@ function buildAssistantResponse({ message, profile, reminderIntent, emergency, n
   if (/(提醒|吃药|喝水|复诊|散步)/.test(text)) {
     return {
       reply: "我可以直接帮您创建提醒。您可以这样说：每天早上 8 点提醒我吃药，或者明天下午 3 点提醒我复诊。",
-      suggestions: ["每天 8 点提醒我吃药", "明天下午 3 点提醒我复诊", "今晚 9 点提醒我喝水"],
+      suggestions: ["提醒我待会儿喝水/吃药", "每天 8 点提醒我吃药", "明天下午 3 点提醒我复诊"],
       intent: "reminder_help",
     };
   }
@@ -326,7 +326,7 @@ function buildAssistantResponse({ message, profile, reminderIntent, emergency, n
 
   return {
     reply: "我听到了。您可以继续多说一点，我会尽量用最简单、最直接的方式帮您。",
-    suggestions: ["陪我聊聊天", "帮我设置提醒", "查看家属记录"],
+    suggestions: ["今天天气怎么样？适合出门散步吗？", "我有点闷，能陪我聊聊天吗？", "今天有什么好玩的新闻或笑话吗？"],
     intent: "general",
   };
 }

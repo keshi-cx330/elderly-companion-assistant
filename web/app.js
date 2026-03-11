@@ -12,10 +12,21 @@ const state = {
   ai: {
     chatConfigured: false,
     chatProviderLabel: "本地规则回复",
+    promptProfile: "elder-companion-cn",
     asrLabel: "浏览器语音识别",
+    asrConfigured: false,
     ttsLabel: "浏览器语音播报",
+    ttsConfigured: false,
   },
-  quickActions: ["陪我聊聊天", "每天早上 8 点提醒我吃药", "查看今日安排", "联系紧急联系人"],
+  welcomeMessage:
+    "爷爷/奶奶，我来陪您聊天啦！您可以叫我小孙子/小孙女。要是想问天气、听个笑话，或者心里闷得慌，直接跟我说就行。比如，今天冷吗？或者给我讲个笑话。",
+  quickActions: [
+    "今天天气怎么样？适合出门散步吗？",
+    "我有点闷，能陪我聊聊天吗？",
+    "提醒我待会儿喝水/吃药",
+    "我头有点晕/不舒服，该怎么办？",
+    "今天有什么好玩的新闻或笑话吗？",
+  ],
   activeEmergency: null,
 };
 
@@ -83,8 +94,20 @@ const refs = {
 
 let recognition = null;
 let recognitionActive = false;
+let voiceButtonBound = false;
 let logSearchTimer = null;
+let mediaRecorder = null;
+let mediaRecorderStream = null;
+let mediaRecorderChunks = [];
+let mediaRecorderMimeType = "";
+let cloudRecordingActive = false;
+let cloudRecordingTimer = null;
+let cloudSpeechAudio = null;
+let cloudSpeechAudioUrl = "";
 const reminderMarks = new Map();
+
+const CLOUD_RECORD_LIMIT_MS = 9000;
+const CLOUD_RECORD_AUDIO_BITS_PER_SEC = 24000;
 
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
@@ -98,13 +121,6 @@ function formatDateTime(value) {
     2,
     "0"
   )} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-function formatShortTime(value) {
-  if (!value) return "--:--";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 function createTextNode(tag, text, className) {
@@ -122,10 +138,44 @@ function showToast(text) {
   setTimeout(() => el.remove(), 2200);
 }
 
-function speak(text, mode = "reply") {
-  if (!window.speechSynthesis || !text) return;
-  if (mode === "reply" && !state.settings.autoSpeak) return;
-  if (mode === "reminder" && !state.settings.reminderVoice) return;
+async function readErrorMessage(response, fallback = "请求失败") {
+  const data = await response.json().catch(() => ({}));
+  return data.error || fallback;
+}
+
+function browserSpeechRecognitionSupported() {
+  return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+function browserTtsSupported() {
+  return Boolean(window.speechSynthesis && window.SpeechSynthesisUtterance);
+}
+
+function mediaRecorderSupported() {
+  return Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
+}
+
+function clearCloudSpeechAudio() {
+  if (cloudSpeechAudio) {
+    cloudSpeechAudio.pause();
+    cloudSpeechAudio.src = "";
+    cloudSpeechAudio = null;
+  }
+  if (cloudSpeechAudioUrl) {
+    URL.revokeObjectURL(cloudSpeechAudioUrl);
+    cloudSpeechAudioUrl = "";
+  }
+}
+
+function stopSpeechPlayback() {
+  if (browserTtsSupported()) {
+    window.speechSynthesis.cancel();
+  }
+  clearCloudSpeechAudio();
+}
+
+function speakWithBrowser(text) {
+  if (!browserTtsSupported() || !text) return;
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "zh-CN";
   utter.rate = 0.94;
@@ -134,15 +184,62 @@ function speak(text, mode = "reply") {
   window.speechSynthesis.speak(utter);
 }
 
+async function speakWithCloud(text) {
+  const response = await fetch("/api/speech/speak", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "语音播报失败"));
+  }
+
+  const blob = await response.blob();
+  if (!blob.size) {
+    throw new Error("语音播报内容为空");
+  }
+
+  stopSpeechPlayback();
+  cloudSpeechAudioUrl = URL.createObjectURL(blob);
+  cloudSpeechAudio = new Audio(cloudSpeechAudioUrl);
+  cloudSpeechAudio.onended = () => clearCloudSpeechAudio();
+  cloudSpeechAudio.onerror = () => clearCloudSpeechAudio();
+  await cloudSpeechAudio.play();
+}
+
+async function speak(text, mode = "reply") {
+  if (!text) return;
+  if (mode === "reply" && !state.settings.autoSpeak) return;
+  if (mode === "reminder" && !state.settings.reminderVoice) return;
+
+  if (state.ai.ttsConfigured) {
+    try {
+      await speakWithCloud(text);
+      return;
+    } catch (error) {
+      if (!browserTtsSupported()) {
+        showToast(error.message);
+        return;
+      }
+      showToast("云端播报失败，已回退本地播报");
+    }
+  }
+
+  speakWithBrowser(text);
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const response = await fetch(path, {
     headers: {
       "Content-Type": "application/json",
     },
     ...options,
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
     throw new Error(data.error || "请求失败");
   }
   return data;
@@ -150,7 +247,7 @@ async function api(path, options = {}) {
 
 function setHeroStatus(text, isError = false) {
   refs.heroStatus.textContent = text;
-  refs.heroStatus.style.color = isError ? "#ffd9d4" : "#e4fff1";
+  refs.heroStatus.style.color = isError ? "#ffd4db" : "#dff6ff";
 }
 
 function setPanel(target) {
@@ -230,12 +327,13 @@ function chatBubble(item) {
 function renderChatHistory() {
   refs.chatList.innerHTML = "";
   if (!state.conversations.length) {
-    const starter = {
-      role: "assistant",
-      content: "您好，我是您的陪伴助手。您可以直接说话，也可以让我帮您设置提醒。",
-      createdAt: new Date().toISOString(),
-    };
-    refs.chatList.appendChild(chatBubble(starter));
+    refs.chatList.appendChild(
+      chatBubble({
+        role: "assistant",
+        content: state.welcomeMessage,
+        createdAt: new Date().toISOString(),
+      })
+    );
     return;
   }
 
@@ -246,12 +344,13 @@ function renderChatHistory() {
 }
 
 function appendChatBubble(role, text) {
-  const item = {
-    role,
-    content: text,
-    createdAt: new Date().toISOString(),
-  };
-  refs.chatList.appendChild(chatBubble(item));
+  refs.chatList.appendChild(
+    chatBubble({
+      role,
+      content: text,
+      createdAt: new Date().toISOString(),
+    })
+  );
   refs.chatList.scrollTop = refs.chatList.scrollHeight;
 }
 
@@ -327,7 +426,8 @@ function renderAgenda() {
   refs.todayReminders.innerHTML = "";
   const items = state.reminders.filter((item) => item.enabled).slice(0, 3);
   if (!items.length) {
-    refs.todayReminders.innerHTML = '<article class="agenda-item"><strong>今天暂无安排</strong><span>可以通过语音说“每天早上 8 点提醒我吃药”。</span></article>';
+    refs.todayReminders.innerHTML =
+      '<article class="agenda-item"><strong>今天暂无安排</strong><span>可以通过语音说“每天早上 8 点提醒我吃药”。</span></article>';
     return;
   }
 
@@ -343,7 +443,8 @@ function renderAgenda() {
 function renderReminders() {
   refs.reminderList.innerHTML = "";
   if (!state.reminders.length) {
-    refs.reminderList.innerHTML = '<article class="reminder-item"><strong class="reminder-title">暂无提醒</strong><p class="reminder-meta">先添加一个吃药、喝水或复诊提醒吧。</p></article>';
+    refs.reminderList.innerHTML =
+      '<article class="reminder-item"><strong class="reminder-title">暂无提醒</strong><p class="reminder-meta">先添加一个吃药、喝水或复诊提醒吧。</p></article>';
     return;
   }
   state.reminders.forEach((item) => refs.reminderList.appendChild(reminderCard(item)));
@@ -431,12 +532,299 @@ function closeEmergencyModal() {
   refs.emergencyModal.classList.add("hidden");
 }
 
+function getEffectiveAsrMode() {
+  if (state.ai.asrConfigured && mediaRecorderSupported()) return "cloud";
+  if (browserSpeechRecognitionSupported()) return "browser";
+  if (state.ai.asrConfigured) return "cloud_unavailable";
+  return "unavailable";
+}
+
+function setVoiceStatusText(text) {
+  refs.voiceStatus.textContent = text;
+}
+
+function updateVoiceUi() {
+  const mode = getEffectiveAsrMode();
+  refs.voiceBtn.classList.toggle("recording", recognitionActive || cloudRecordingActive);
+
+  if (recognitionActive) {
+    refs.voiceBtn.disabled = false;
+    refs.voiceBtn.textContent = "正在听，请直接说话";
+    setVoiceStatusText("识别中");
+    return;
+  }
+
+  if (cloudRecordingActive) {
+    refs.voiceBtn.disabled = false;
+    refs.voiceBtn.textContent = "结束录音并发送";
+    setVoiceStatusText(`录音中，${state.ai.asrLabel}`);
+    return;
+  }
+
+  refs.voiceBtn.textContent = "按此开始语音";
+
+  if (mode === "cloud") {
+    refs.voiceBtn.disabled = false;
+    setVoiceStatusText(`语音待命，${state.ai.asrLabel}`);
+    return;
+  }
+
+  if (mode === "browser") {
+    refs.voiceBtn.disabled = false;
+    setVoiceStatusText("语音待命，浏览器语音识别");
+    return;
+  }
+
+  refs.voiceBtn.disabled = true;
+  setVoiceStatusText(
+    mode === "cloud_unavailable"
+      ? "云端语音已配置，但当前浏览器不支持录音，请改用文字输入。"
+      : "当前浏览器不支持语音识别，请改用文字输入。"
+  );
+}
+
+function ensureRecognition() {
+  if (recognition || !browserSpeechRecognitionSupported()) {
+    return recognition;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.lang = "zh-CN";
+  recognition.interimResults = false;
+  recognition.continuous = false;
+
+  recognition.onstart = () => {
+    recognitionActive = true;
+    updateVoiceUi();
+  };
+
+  recognition.onend = () => {
+    recognitionActive = false;
+    updateVoiceUi();
+  };
+
+  recognition.onerror = () => {
+    recognitionActive = false;
+    showToast("语音识别失败，请重试");
+    updateVoiceUi();
+  };
+
+  recognition.onresult = (event) => {
+    const transcript = event.results?.[0]?.[0]?.transcript?.trim() || "";
+    if (!transcript) return;
+    refs.chatInput.value = transcript;
+    void submitChat(transcript, "voice");
+    refs.chatInput.value = "";
+  };
+
+  return recognition;
+}
+
+function releaseMediaRecorderStream() {
+  if (mediaRecorderStream) {
+    mediaRecorderStream.getTracks().forEach((track) => track.stop());
+    mediaRecorderStream = null;
+  }
+}
+
+function resetCloudRecorderState() {
+  clearTimeout(cloudRecordingTimer);
+  cloudRecordingTimer = null;
+  cloudRecordingActive = false;
+  mediaRecorder = null;
+  mediaRecorderChunks = [];
+  mediaRecorderMimeType = "";
+  releaseMediaRecorderStream();
+}
+
+function preferredRecordingMimeType() {
+  if (!window.MediaRecorder?.isTypeSupported) return "";
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  return candidates.find((item) => window.MediaRecorder.isTypeSupported(item)) || "";
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const [, base64 = ""] = result.split(",", 2);
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("音频读取失败"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function transcribeAudioBlob(blob) {
+  const audioBase64 = await blobToBase64(blob);
+  const data = await api("/api/speech/transcribe", {
+    method: "POST",
+    body: JSON.stringify({
+      audioBase64,
+      mimeType: blob.type || mediaRecorderMimeType || "audio/webm",
+      fileName: `voice.${(blob.type || "audio/webm").includes("mp4") ? "m4a" : "webm"}`,
+    }),
+  });
+  return data.transcript || "";
+}
+
+async function handleCloudRecorderStop(chunks, mimeType) {
+  resetCloudRecorderState();
+  updateVoiceUi();
+
+  if (!chunks.length) {
+    setVoiceStatusText("没有收到录音，请重试");
+    return;
+  }
+
+  refs.voiceBtn.disabled = true;
+  setVoiceStatusText("正在转写，请稍候");
+
+  try {
+    const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+    const transcript = await transcribeAudioBlob(blob);
+    if (!transcript) {
+      throw new Error("没有识别到清晰语音，请再说一次");
+    }
+    refs.chatInput.value = transcript;
+    await submitChat(transcript, "voice");
+    refs.chatInput.value = "";
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    refs.voiceBtn.disabled = false;
+    updateVoiceUi();
+  }
+}
+
+async function startCloudRecording() {
+  if (!mediaRecorderSupported()) {
+    showToast("当前浏览器不支持录音");
+    updateVoiceUi();
+    return;
+  }
+
+  stopSpeechPlayback();
+
+  try {
+    mediaRecorderStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+    mediaRecorderMimeType = preferredRecordingMimeType();
+    mediaRecorderChunks = [];
+    mediaRecorder = mediaRecorderMimeType
+      ? new MediaRecorder(mediaRecorderStream, {
+          mimeType: mediaRecorderMimeType,
+          audioBitsPerSecond: CLOUD_RECORD_AUDIO_BITS_PER_SEC,
+        })
+      : new MediaRecorder(mediaRecorderStream);
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data?.size) {
+        mediaRecorderChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.onerror = () => {
+      resetCloudRecorderState();
+      showToast("录音失败，请重试");
+      updateVoiceUi();
+    };
+
+    mediaRecorder.onstop = () => {
+      const chunks = [...mediaRecorderChunks];
+      const mimeType = mediaRecorder?.mimeType || mediaRecorderMimeType;
+      void handleCloudRecorderStop(chunks, mimeType);
+    };
+
+    mediaRecorder.start();
+    cloudRecordingActive = true;
+    updateVoiceUi();
+    cloudRecordingTimer = setTimeout(() => {
+      if (mediaRecorder?.state === "recording") {
+        mediaRecorder.stop();
+      }
+    }, CLOUD_RECORD_LIMIT_MS);
+  } catch {
+    resetCloudRecorderState();
+    showToast("无法打开麦克风，请检查浏览器权限");
+    updateVoiceUi();
+  }
+}
+
+function stopCloudRecording() {
+  if (!mediaRecorder) return;
+  clearTimeout(cloudRecordingTimer);
+  cloudRecordingTimer = null;
+  cloudRecordingActive = false;
+  if (mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+  } else {
+    resetCloudRecorderState();
+    updateVoiceUi();
+  }
+}
+
+async function handleVoiceButtonClick() {
+  const mode = getEffectiveAsrMode();
+  if (mode === "cloud") {
+    if (cloudRecordingActive) {
+      stopCloudRecording();
+      return;
+    }
+    await startCloudRecording();
+    return;
+  }
+
+  if (mode === "browser") {
+    const speechRecognition = ensureRecognition();
+    if (!speechRecognition) {
+      updateVoiceUi();
+      return;
+    }
+    stopSpeechPlayback();
+    if (recognitionActive) {
+      speechRecognition.stop();
+      return;
+    }
+    try {
+      speechRecognition.start();
+    } catch {
+      setVoiceStatusText("语音识别启动失败，请重试");
+    }
+    return;
+  }
+
+  showToast("当前设备不支持语音输入，请改用文字输入");
+  updateVoiceUi();
+}
+
+function initVoice() {
+  if (!voiceButtonBound) {
+    refs.voiceBtn.addEventListener("click", () => {
+      void handleVoiceButtonClick();
+    });
+    voiceButtonBound = true;
+  }
+  updateVoiceUi();
+}
+
 async function refreshOverview() {
   const data = await api("/api/bootstrap");
   state.ai = {
     ...state.ai,
     ...(data.ai || {}),
   };
+  state.welcomeMessage = data.experience?.welcomeMessage || state.welcomeMessage;
+  if (Array.isArray(data.experience?.quickActions) && data.experience.quickActions.length) {
+    state.quickActions = data.experience.quickActions;
+  }
   state.profile = data.profile || {};
   state.settings = {
     ...state.settings,
@@ -456,6 +844,7 @@ async function refreshOverview() {
   renderReminders();
   renderDashboard();
   renderLogs();
+  updateVoiceUi();
 }
 
 async function loadLogs() {
@@ -483,7 +872,7 @@ async function submitChat(message, source = "text") {
     appendChatBubble("assistant", data.reply || "我收到啦。");
     state.quickActions = Array.isArray(data.suggestions) && data.suggestions.length ? data.suggestions : state.quickActions;
     renderQuickActions(state.quickActions);
-    speak(data.reply || "", "reply");
+    void speak(data.reply || "", "reply");
 
     if (data.reminder) {
       showToast("提醒已创建");
@@ -499,55 +888,6 @@ async function submitChat(message, source = "text") {
   } catch (error) {
     showToast(error.message);
   }
-}
-
-function initVoice() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    refs.voiceBtn.disabled = true;
-    refs.voiceStatus.textContent = "当前浏览器不支持语音识别，请改用文字输入。";
-    return;
-  }
-
-  recognition = new SpeechRecognition();
-  recognition.lang = "zh-CN";
-  recognition.interimResults = false;
-  recognition.continuous = false;
-
-  recognition.onstart = () => {
-    recognitionActive = true;
-    refs.voiceBtn.classList.add("recording");
-    refs.voiceBtn.textContent = "正在听，请直接说话";
-    refs.voiceStatus.textContent = "识别中";
-  };
-
-  recognition.onend = () => {
-    recognitionActive = false;
-    refs.voiceBtn.classList.remove("recording");
-    refs.voiceBtn.textContent = "按此开始语音";
-    refs.voiceStatus.textContent = "语音待命";
-  };
-
-  recognition.onerror = () => {
-    refs.voiceStatus.textContent = "语音识别失败，请重试";
-  };
-
-  recognition.onresult = (event) => {
-    const transcript = event.results?.[0]?.[0]?.transcript?.trim() || "";
-    if (!transcript) return;
-    refs.chatInput.value = transcript;
-    void submitChat(transcript, "voice");
-    refs.chatInput.value = "";
-  };
-
-  refs.voiceBtn.addEventListener("click", () => {
-    if (!recognition) return;
-    if (recognitionActive) {
-      recognition.stop();
-      return;
-    }
-    recognition.start();
-  });
 }
 
 function bindNavigation() {
@@ -707,7 +1047,7 @@ function startReminderTicker() {
       if (!shouldTriggerReminder(reminder, now)) return;
       appendChatBubble("assistant", `提醒您：${reminder.title}`);
       showToast(`提醒：${reminder.title}`);
-      speak(`提醒您，${reminder.title}`, "reminder");
+      void speak(`提醒您，${reminder.title}`, "reminder");
 
       try {
         await api("/api/reminders/trigger", {
@@ -729,6 +1069,11 @@ function registerServiceWorker() {
   });
 }
 
+function currentSpeechSummary() {
+  const chatLabel = state.ai.chatConfigured ? `${state.ai.chatProviderLabel} 已启用` : "当前使用本地对话回复";
+  return `${chatLabel}，ASR：${state.ai.asrLabel}，TTS：${state.ai.ttsLabel}`;
+}
+
 async function boot() {
   bindNavigation();
   bindForms();
@@ -738,8 +1083,12 @@ async function boot() {
 
   try {
     const health = await api("/api/health");
-    const chatLabel = health?.ai?.chatConfigured ? `${health.ai.chatProviderLabel} 已启用` : "当前使用本地对话回复";
-    setHeroStatus(`${chatLabel}，语音输入/播报使用浏览器能力`);
+    state.ai = {
+      ...state.ai,
+      ...(health.ai || {}),
+    };
+    updateVoiceUi();
+    setHeroStatus(currentSpeechSummary());
   } catch {
     setHeroStatus("服务不可用，请检查后端是否已启动", true);
   }
@@ -747,9 +1096,7 @@ async function boot() {
   try {
     await refreshOverview();
     renderQuickActions(state.quickActions);
-    if (state.ai?.chatConfigured) {
-      setHeroStatus(`${state.ai.chatProviderLabel} 已启用，ASR/TTS 使用浏览器能力`);
-    }
+    setHeroStatus(currentSpeechSummary());
   } catch (error) {
     showToast(error.message || "初始化失败");
   }
