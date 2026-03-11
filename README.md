@@ -161,35 +161,35 @@ HOST=0.0.0.0 PORT=3000 npm start
 ## 项目结构
 ```text
 .
-├─ server.js
+├─ server.js                         # 服务启动入口，负责读取配置并启动 HTTP 服务
 ├─ src/server/
-│  ├─ app.js
-│  ├─ ai.js
-│  ├─ briefing.js
-│  ├─ config.js
-│  ├─ domain.js
-│  ├─ knowledge.js
-│  ├─ notifications.js
-│  ├─ prompt.js
-│  ├─ speech.js
-│  └─ store.js
+│  ├─ app.js                         # 主接口层，负责路由、参数校验、响应组装和静态资源分发
+│  ├─ ai.js                          # DeepSeek 对话接入层，负责构造消息、请求模型和能力状态输出
+│  ├─ briefing.js                    # 晨间播报与实时服务层，负责天气、正向资讯和每日摘要生成
+│  ├─ config.js                      # 环境变量与运行配置集中定义
+│  ├─ domain.js                      # 业务规则层，负责提醒解析、紧急识别、仪表盘统计等纯业务逻辑
+│  ├─ knowledge.js                   # 本地知识库加载与问答匹配逻辑
+│  ├─ notifications.js               # 家属通知能力，负责 webhook 发送、摘要生成和通知状态
+│  ├─ prompt.js                      # Prompt 配置加载、场景匹配和系统提示词编排
+│  ├─ speech.js                      # 云端 ASR / TTS 网关，负责语音转写与语音合成请求
+│  └─ store.js                       # 存储抽象层，负责 JSON / SQLite 读写、归一化和原子更新
 ├─ config/
-│  ├─ agent-prompt.json
-│  └─ elder-knowledge-base.json
+│  ├─ agent-prompt.json              # 陪伴 Agent 的角色、语气、安全边界和场景 Prompt 配置
+│  └─ elder-knowledge-base.json      # 开场白、预置问题和本地问答知识库
 ├─ web/
-│  ├─ index.html
-│  ├─ app.js
-│  ├─ styles.css
-│  ├─ sw.js
-│  ├─ manifest.webmanifest
-│  └─ icon.svg
+│  ├─ index.html                     # 前端页面骨架，定义四个主要面板和核心交互区域
+│  ├─ app.js                         # 前端交互逻辑，负责状态管理、语音交互、接口调用和渲染
+│  ├─ styles.css                     # 移动端视觉样式与适老化界面主题
+│  ├─ sw.js                          # Service Worker，负责缓存页面外壳和 PWA 资源
+│  ├─ manifest.webmanifest           # PWA 安装清单，定义名称、图标和主题色
+│  └─ icon.svg                       # 应用图标资源
 ├─ data/
-│  └─ store.json
+│  └─ store.json                     # 默认本地数据文件，JSON 模式下保存资料、提醒、对话和事件
 ├─ docs/
-│  ├─ PRD.md
-│  └─ DEPLOY.md
+│  ├─ PRD.md                         # 产品需求文档，描述目标用户、范围、流程、数据模型和验收标准
+│  └─ DEPLOY.md                      # Linux 部署文档，覆盖 systemd、Nginx、HTTPS、SQLite 和 webhook
 └─ test/
-   └─ api.test.js
+   └─ api.test.js                    # 接口自动化测试，覆盖健康检查、提醒、紧急、播报和家属通知
 ```
 
 ## 主要接口
