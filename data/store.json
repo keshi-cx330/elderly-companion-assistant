@@ -1,0 +1,13 @@
+{
+  "profile": {
+    "name": "王阿姨",
+    "age": "68",
+    "preferences": "喜欢聊天、散步、听戏曲",
+    "notes": "",
+    "emergencyContactName": "李先生",
+    "emergencyContactPhone": "13800000000"
+  },
+  "reminders": [],
+  "conversations": [],
+  "events": []
+}
