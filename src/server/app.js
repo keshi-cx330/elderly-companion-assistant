@@ -3,8 +3,15 @@ const fs = require("fs/promises");
 const path = require("path");
 const { URL } = require("url");
 const { aiCapabilities, createDeepSeekReply, isDeepSeekEnabled } = require("./ai");
+const { buildLiveReply, getDailyBriefing } = require("./briefing");
 const { APP_NAME, APP_VERSION, DEFAULT_DATA_FILE, MAX_BODY_SIZE, WEB_DIR } = require("./config");
 const { findBestKnowledgeMatch, getAssistantExperience, knowledgeReply } = require("./knowledge");
+const {
+  buildCaregiverDigest,
+  buildCaregiverStatus,
+  notifyCaregiver,
+  shouldSendDailyDigest,
+} = require("./notifications");
 const { getPromptProfileView } = require("./prompt");
 const { isCloudAsrEnabled, isCloudTtsEnabled, synthesizeSpeech, transcribeAudio } = require("./speech");
 const {
@@ -24,7 +31,7 @@ const {
   timelineFromStore,
   trimArray,
 } = require("./domain");
-const { readStore, mutateStore } = require("./store");
+const { readStore, mutateStore, storeCapabilities } = require("./store");
 
 const staticTypes = {
   ".css": "text/css; charset=utf-8",
@@ -132,6 +139,7 @@ function buildBootstrapPayload(store, now = new Date()) {
   return {
     ai: aiCapabilities(),
     experience: getAssistantExperience(),
+    caregiver: buildCaregiverStatus(store),
     profile: store.profile,
     settings: store.settings,
     reminders: sortedReminders(store.reminders, now),
@@ -139,6 +147,78 @@ function buildBootstrapPayload(store, now = new Date()) {
     logs: timelineFromStore(store).slice(0, 80),
     dashboard: dashboard.summary,
     upcomingReminders: dashboard.reminders,
+  };
+}
+
+async function recordCaregiverNotificationResult(dataFile, payload, result, now = new Date()) {
+  await mutateStore(
+    async (store) => {
+      if (payload.markDigestDate) {
+        store.settings.lastDigestDate = payload.markDigestDate;
+      }
+      addEvent(
+        store,
+        "caregiver_notification",
+        result.delivered
+          ? `家属通知已发送：${payload.title}`
+          : result.attempted
+            ? `家属通知发送失败：${payload.title}`
+            : `家属通知未配置：${payload.title}`,
+        {
+          type: payload.type,
+          delivered: result.delivered,
+          attempted: result.attempted,
+          results: result.results || [],
+        },
+        result.delivered ? "info" : "normal"
+      );
+    },
+    dataFile
+  );
+}
+
+async function sendCaregiverNotification(dataFile, payload) {
+  const store = await readStore(dataFile);
+  const result = await notifyCaregiver({
+    store,
+    type: payload.type,
+    title: payload.title,
+    message: payload.message,
+    meta: payload.meta,
+  });
+  await recordCaregiverNotificationResult(dataFile, payload, result);
+  return result;
+}
+
+async function maybeSendCaregiverDigest(dataFile, store, now = new Date()) {
+  const caregiver = buildCaregiverStatus(store);
+  if (!caregiver.webhookCount || !shouldSendDailyDigest(store, now)) {
+    return null;
+  }
+
+  const digest = buildCaregiverDigest(store, now);
+  const result = await notifyCaregiver({
+    store,
+    type: "daily_digest",
+    title: digest.title,
+    message: digest.message,
+    meta: digest.meta,
+  });
+  if (result.attempted) {
+    await recordCaregiverNotificationResult(
+      dataFile,
+      {
+        type: "daily_digest",
+        title: digest.title,
+        markDigestDate: now.toISOString().slice(0, 10),
+      },
+      result,
+      now
+    );
+  }
+  return {
+    digest,
+    result,
   };
 }
 
@@ -197,6 +277,7 @@ async function handleApi(req, res, urlObj, options) {
       app: APP_NAME,
       version: APP_VERSION,
       ai: aiCapabilities(),
+      storage: storeCapabilities(),
       now: new Date().toISOString(),
       uptimeSec: Math.round(process.uptime()),
     });
@@ -204,8 +285,26 @@ async function handleApi(req, res, urlObj, options) {
   }
 
   if (method === "GET" && pathname === "/api/bootstrap") {
-    const store = await readStore(dataFile);
+    let store = await readStore(dataFile);
+    const digestResult = await maybeSendCaregiverDigest(dataFile, store);
+    if (digestResult?.result?.attempted) {
+      store = await readStore(dataFile);
+    }
     sendJson(res, 200, buildBootstrapPayload(store));
+    return true;
+  }
+
+  if (method === "GET" && pathname === "/api/briefing") {
+    const store = await readStore(dataFile);
+    const reminders = sortedReminders(store.reminders);
+    const briefing = await getDailyBriefing({
+      profile: store.profile,
+      reminders,
+    });
+    sendJson(res, 200, {
+      briefing,
+      caregiver: buildCaregiverStatus(store),
+    });
     return true;
   }
 
@@ -250,7 +349,7 @@ async function handleApi(req, res, urlObj, options) {
 
   if (method === "GET" && pathname === "/api/profile") {
     const store = await readStore(dataFile);
-    sendJson(res, 200, { profile: store.profile });
+    sendJson(res, 200, { profile: store.profile, caregiver: buildCaregiverStatus(store) });
     return true;
   }
 
@@ -262,8 +361,13 @@ async function handleApi(req, res, urlObj, options) {
       preferences: safeText(body.preferences, 200),
       notes: safeText(body.notes, 300),
       address: safeText(body.address, 120),
+      location: safeText(body.location, 40),
       emergencyContactName: safeText(body.emergencyContactName, 30),
       emergencyContactPhone: safePhone(body.emergencyContactPhone),
+      caregiverName: safeText(body.caregiverName, 30),
+      caregiverPhone: safePhone(body.caregiverPhone),
+      caregiverRelation: safeText(body.caregiverRelation, 20),
+      caregiverWebhookUrl: safeText(body.caregiverWebhookUrl, 300),
     };
     let profile = null;
 
@@ -300,6 +404,12 @@ async function handleApi(req, res, urlObj, options) {
           autoSpeak: safeBoolean(body.autoSpeak, store.settings.autoSpeak),
           largeText: safeBoolean(body.largeText, store.settings.largeText),
           reminderVoice: safeBoolean(body.reminderVoice, store.settings.reminderVoice),
+          interfaceMode: body.interfaceMode === "family" ? "family" : "elder",
+          reducedMotion: safeBoolean(body.reducedMotion, store.settings.reducedMotion),
+          caregiverDigestEnabled: safeBoolean(body.caregiverDigestEnabled, store.settings.caregiverDigestEnabled),
+          caregiverDigestHour: isValidTime(safeText(body.caregiverDigestHour, 5))
+            ? safeText(body.caregiverDigestHour, 5)
+            : store.settings.caregiverDigestHour,
         };
         settings = store.settings;
         addEvent(store, "settings_updated", "用户更新了可访问性设置", { settings });
@@ -308,6 +418,70 @@ async function handleApi(req, res, urlObj, options) {
     );
 
     sendJson(res, 200, { settings });
+    return true;
+  }
+
+  if (method === "GET" && pathname === "/api/caregiver/status") {
+    const store = await readStore(dataFile);
+    sendJson(res, 200, {
+      caregiver: buildCaregiverStatus(store),
+      digestPreview: buildCaregiverDigest(store),
+      dashboard: buildDashboard(store).summary,
+    });
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/caregiver/notify-test") {
+    const store = await readStore(dataFile);
+    const payload = {
+      type: "caregiver_test",
+      title: "老人陪伴助手通知测试",
+      message: `${store.profile.name || "老人"} 的家属通知链路测试成功，后续紧急事件会从这里发出。`,
+      meta: {
+        test: true,
+      },
+    };
+    const result = await notifyCaregiver({
+      store,
+      type: payload.type,
+      title: payload.title,
+      message: payload.message,
+      meta: payload.meta,
+    });
+    await recordCaregiverNotificationResult(dataFile, payload, result);
+    sendJson(res, 200, {
+      ok: true,
+      caregiver: buildCaregiverStatus(store),
+      result,
+    });
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/caregiver/digest") {
+    const store = await readStore(dataFile);
+    const digest = buildCaregiverDigest(store);
+    const today = new Date().toISOString().slice(0, 10);
+    const result = await notifyCaregiver({
+      store,
+      type: "daily_digest",
+      title: digest.title,
+      message: digest.message,
+      meta: digest.meta,
+    });
+    await recordCaregiverNotificationResult(
+      dataFile,
+      {
+        type: "daily_digest",
+        title: digest.title,
+        markDigestDate: result.attempted ? today : "",
+      },
+      result
+    );
+    sendJson(res, 200, {
+      ok: true,
+      digest,
+      result,
+    });
     return true;
   }
 
@@ -463,23 +637,36 @@ async function handleApi(req, res, urlObj, options) {
     }
 
     let responsePayload = null;
+    let notificationPlan = null;
 
     await mutateStore(
       async (store) => {
         const emergency = detectEmergency(message);
         const reminderIntent = emergency ? null : parseReminderIntent(message);
+        const liveAssistant = emergency || reminderIntent
+          ? null
+          : await buildLiveReply({
+              message,
+              profile: store.profile,
+              reminders: sortedReminders(store.reminders),
+            });
         const bestKnowledgeMatch = emergency || reminderIntent ? null : findBestKnowledgeMatch(message);
         const knowledgeAssistant = knowledgeReply(bestKnowledgeMatch);
         const fallbackAssistant =
+          liveAssistant ||
           knowledgeAssistant ||
           buildAssistantResponse({
-          message,
-          profile: store.profile,
-          reminderIntent,
-          emergency,
+            message,
+            profile: store.profile,
+            reminderIntent,
+            emergency,
           });
         let assistant = fallbackAssistant;
-        let replyProvider = knowledgeAssistant ? "local-knowledge" : "local-rule";
+        let replyProvider = liveAssistant
+          ? liveAssistant.provider
+          : knowledgeAssistant
+            ? "local-knowledge"
+            : "local-rule";
 
         const userMessage = {
           id: createId("chat"),
@@ -525,7 +712,17 @@ async function handleApi(req, res, urlObj, options) {
             },
             "high"
           );
-        } else if (!reminderIntent && !knowledgeAssistant && isDeepSeekEnabled()) {
+          notificationPlan = {
+            type: "emergency_alert",
+            title: `${store.profile.name || "老人"}触发紧急告警`,
+            message: `${message.slice(0, 80)}。请尽快联系${store.profile.name || "老人"}，必要时直接拨打 120。`,
+            meta: {
+              label: emergency.label,
+              address: store.profile.address,
+              contactPhone: store.profile.emergencyContactPhone,
+            },
+          };
+        } else if (!reminderIntent && !knowledgeAssistant && !liveAssistant && isDeepSeekEnabled()) {
           try {
             const aiReply = await createDeepSeekReply({
               history: recentConversations(store, 10),
@@ -588,10 +785,15 @@ async function handleApi(req, res, urlObj, options) {
             : null,
           reminder: createdReminder ? decorateReminder(createdReminder) : null,
           ai: aiCapabilities(),
+          briefing: liveAssistant?.briefing || null,
         };
       },
       dataFile
     );
+
+    if (notificationPlan) {
+      await sendCaregiverNotification(dataFile, notificationPlan);
+    }
 
     sendJson(res, 200, responsePayload);
     return true;
@@ -608,6 +810,15 @@ async function handleApi(req, res, urlObj, options) {
       },
       dataFile
     );
+
+    await sendCaregiverNotification(dataFile, {
+      type: "manual_sos",
+      title: "收到一键求助上报",
+      message: `${action}。症状描述：${symptom || "手动求助"}。请尽快电话确认。`,
+      meta: {
+        symptom,
+      },
+    });
 
     sendJson(res, 201, { ok: true });
     return true;

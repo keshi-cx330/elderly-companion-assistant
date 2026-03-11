@@ -1,6 +1,14 @@
 const fs = require("fs/promises");
 const path = require("path");
-const { DEFAULT_DATA_FILE } = require("./config");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const {
+  DEFAULT_DATA_FILE,
+  DEFAULT_JSON_FILE,
+  SQLITE_BIN,
+  SQLITE_FILE,
+  STORAGE_DRIVER,
+} = require("./config");
 
 const defaultStore = {
   version: 2,
@@ -10,13 +18,23 @@ const defaultStore = {
     preferences: "喜欢聊天、散步、听戏曲",
     notes: "有高血压史，外出会携带常用药。",
     address: "上海市浦东新区示例路 18 号 2 单元",
+    location: "上海浦东新区",
     emergencyContactName: "李先生",
     emergencyContactPhone: "13800000000",
+    caregiverName: "李先生",
+    caregiverPhone: "13800000000",
+    caregiverRelation: "儿子",
+    caregiverWebhookUrl: "",
   },
   settings: {
     autoSpeak: true,
     largeText: true,
     reminderVoice: true,
+    interfaceMode: "elder",
+    reducedMotion: false,
+    caregiverDigestEnabled: false,
+    caregiverDigestHour: "08:30",
+    lastDigestDate: "",
   },
   reminders: [],
   conversations: [],
@@ -24,6 +42,7 @@ const defaultStore = {
 };
 
 const writeQueues = new Map();
+const execFileAsync = promisify(execFile);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -84,6 +103,10 @@ function normalizeStore(input = {}) {
 }
 
 async function ensureStore(dataFile = DEFAULT_DATA_FILE) {
+  if (STORAGE_DRIVER === "sqlite") {
+    await ensureSqliteStore(dataFile);
+    return;
+  }
   await fs.mkdir(path.dirname(dataFile), { recursive: true });
   try {
     await fs.access(dataFile);
@@ -93,6 +116,9 @@ async function ensureStore(dataFile = DEFAULT_DATA_FILE) {
 }
 
 async function readStore(dataFile = DEFAULT_DATA_FILE) {
+  if (STORAGE_DRIVER === "sqlite") {
+    return readSqliteStore(dataFile);
+  }
   await ensureStore(dataFile);
   const raw = await fs.readFile(dataFile, "utf8");
 
@@ -108,6 +134,10 @@ async function readStore(dataFile = DEFAULT_DATA_FILE) {
 }
 
 async function writeStore(store, dataFile = DEFAULT_DATA_FILE) {
+  if (STORAGE_DRIVER === "sqlite") {
+    await writeSqliteStore(store, dataFile);
+    return;
+  }
   await fs.mkdir(path.dirname(dataFile), { recursive: true });
   const normalized = normalizeStore(store);
   const tempFile = `${dataFile}.tmp`;
@@ -139,4 +169,355 @@ module.exports = {
   readStore,
   writeStore,
   mutateStore,
+  storeCapabilities,
 };
+
+function sqlQuote(value) {
+  if (value == null) return "NULL";
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function sqlBool(value) {
+  return value ? 1 : 0;
+}
+
+function sqliteEnabled() {
+  return STORAGE_DRIVER === "sqlite";
+}
+
+function storeCapabilities() {
+  return {
+    driver: sqliteEnabled() ? "sqlite" : "json",
+    driverLabel: sqliteEnabled() ? "SQLite" : "JSON 文件存储",
+    dataFile: sqliteEnabled() ? SQLITE_FILE : DEFAULT_JSON_FILE,
+    sqliteBin: SQLITE_BIN,
+  };
+}
+
+async function sqliteExec(dbFile, sql, { json = false } = {}) {
+  const args = [];
+  if (json) args.push("-json");
+  args.push(dbFile, sql);
+  const { stdout } = await execFileAsync(SQLITE_BIN, args, {
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  return stdout.trim();
+}
+
+async function sqliteJson(dbFile, sql) {
+  const output = await sqliteExec(dbFile, sql, { json: true });
+  if (!output) return [];
+  try {
+    return JSON.parse(output);
+  } catch {
+    return [];
+  }
+}
+
+async function sqliteRun(dbFile, sql) {
+  await sqliteExec(dbFile, sql);
+}
+
+async function ensureSqliteStore(dbFile = SQLITE_FILE) {
+  await fs.mkdir(path.dirname(dbFile), { recursive: true });
+
+  await sqliteRun(
+    dbFile,
+    [
+      "PRAGMA journal_mode=WAL;",
+      "PRAGMA synchronous=NORMAL;",
+      "CREATE TABLE IF NOT EXISTS profile (",
+      "  id INTEGER PRIMARY KEY CHECK (id = 1),",
+      "  name TEXT NOT NULL DEFAULT '',",
+      "  age TEXT NOT NULL DEFAULT '',",
+      "  preferences TEXT NOT NULL DEFAULT '',",
+      "  notes TEXT NOT NULL DEFAULT '',",
+      "  address TEXT NOT NULL DEFAULT '',",
+      "  location TEXT NOT NULL DEFAULT '',",
+      "  emergency_contact_name TEXT NOT NULL DEFAULT '',",
+      "  emergency_contact_phone TEXT NOT NULL DEFAULT '',",
+      "  caregiver_name TEXT NOT NULL DEFAULT '',",
+      "  caregiver_phone TEXT NOT NULL DEFAULT '',",
+      "  caregiver_relation TEXT NOT NULL DEFAULT '',",
+      "  caregiver_webhook_url TEXT NOT NULL DEFAULT ''",
+      ");",
+      "CREATE TABLE IF NOT EXISTS settings (",
+      "  id INTEGER PRIMARY KEY CHECK (id = 1),",
+      "  auto_speak INTEGER NOT NULL DEFAULT 1,",
+      "  large_text INTEGER NOT NULL DEFAULT 1,",
+      "  reminder_voice INTEGER NOT NULL DEFAULT 1,",
+      "  interface_mode TEXT NOT NULL DEFAULT 'elder',",
+      "  reduced_motion INTEGER NOT NULL DEFAULT 0,",
+      "  caregiver_digest_enabled INTEGER NOT NULL DEFAULT 0,",
+      "  caregiver_digest_hour TEXT NOT NULL DEFAULT '08:30',",
+      "  last_digest_date TEXT NOT NULL DEFAULT ''",
+      ");",
+      "CREATE TABLE IF NOT EXISTS reminders (",
+      "  id TEXT PRIMARY KEY,",
+      "  title TEXT NOT NULL,",
+      "  time TEXT NOT NULL,",
+      "  repeat TEXT NOT NULL,",
+      "  schedule_date TEXT NOT NULL DEFAULT '',",
+      "  enabled INTEGER NOT NULL DEFAULT 1,",
+      "  last_triggered_at TEXT NOT NULL DEFAULT '',",
+      "  last_triggered_date TEXT NOT NULL DEFAULT '',",
+      "  created_at TEXT NOT NULL DEFAULT ''",
+      ");",
+      "CREATE TABLE IF NOT EXISTS conversations (",
+      "  id TEXT PRIMARY KEY,",
+      "  role TEXT NOT NULL,",
+      "  content TEXT NOT NULL,",
+      "  source TEXT NOT NULL DEFAULT 'text',",
+      "  created_at TEXT NOT NULL DEFAULT ''",
+      ");",
+      "CREATE TABLE IF NOT EXISTS events (",
+      "  id TEXT PRIMARY KEY,",
+      "  type TEXT NOT NULL,",
+      "  level TEXT NOT NULL DEFAULT 'normal',",
+      "  message TEXT NOT NULL,",
+      "  meta TEXT NOT NULL DEFAULT '{}',",
+      "  created_at TEXT NOT NULL DEFAULT ''",
+      ");",
+      "CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);",
+      "CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON conversations(created_at DESC);",
+      "CREATE INDEX IF NOT EXISTS idx_reminders_enabled ON reminders(enabled, time);",
+    ].join("\n")
+  );
+
+  const rows = await sqliteJson(dbFile, "SELECT COUNT(*) AS count FROM profile;");
+  if (Number(rows[0]?.count || 0) > 0) {
+    return;
+  }
+
+  let seed = clone(defaultStore);
+  if (dbFile !== DEFAULT_JSON_FILE) {
+    try {
+      const raw = await fs.readFile(DEFAULT_JSON_FILE, "utf8");
+      seed = normalizeStore(JSON.parse(raw));
+    } catch {
+      seed = clone(defaultStore);
+    }
+  }
+  await persistSqliteStore(seed, dbFile);
+}
+
+async function readSqliteStore(dbFile = SQLITE_FILE) {
+  await ensureSqliteStore(dbFile);
+
+  const [profileRows, settingsRows, reminderRows, conversationRows, eventRows] = await Promise.all([
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  name,",
+        "  age,",
+        "  preferences,",
+        "  notes,",
+        "  address,",
+        "  location,",
+        "  emergency_contact_name AS emergencyContactName,",
+        "  emergency_contact_phone AS emergencyContactPhone,",
+        "  caregiver_name AS caregiverName,",
+        "  caregiver_phone AS caregiverPhone,",
+        "  caregiver_relation AS caregiverRelation,",
+        "  caregiver_webhook_url AS caregiverWebhookUrl",
+        "FROM profile",
+        "LIMIT 1;",
+      ].join("\n")
+    ),
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  auto_speak AS autoSpeak,",
+        "  large_text AS largeText,",
+        "  reminder_voice AS reminderVoice,",
+        "  interface_mode AS interfaceMode,",
+        "  reduced_motion AS reducedMotion,",
+        "  caregiver_digest_enabled AS caregiverDigestEnabled,",
+        "  caregiver_digest_hour AS caregiverDigestHour,",
+        "  last_digest_date AS lastDigestDate",
+        "FROM settings",
+        "LIMIT 1;",
+      ].join("\n")
+    ),
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  id,",
+        "  title,",
+        "  time,",
+        "  repeat,",
+        "  schedule_date AS scheduleDate,",
+        "  enabled,",
+        "  last_triggered_at AS lastTriggeredAt,",
+        "  last_triggered_date AS lastTriggeredDate,",
+        "  created_at AS createdAt",
+        "FROM reminders",
+        "ORDER BY created_at DESC;",
+      ].join("\n")
+    ),
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  id,",
+        "  role,",
+        "  content,",
+        "  source,",
+        "  created_at AS createdAt",
+        "FROM conversations",
+        "ORDER BY created_at ASC;",
+      ].join("\n")
+    ),
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  id,",
+        "  type,",
+        "  level,",
+        "  message,",
+        "  meta,",
+        "  created_at AS createdAt",
+        "FROM events",
+        "ORDER BY created_at DESC;",
+      ].join("\n")
+    ),
+  ]);
+
+  return normalizeStore({
+    version: 3,
+    profile: profileRows[0] || {},
+    settings: {
+      ...(settingsRows[0] || {}),
+      autoSpeak: Boolean(Number(settingsRows[0]?.autoSpeak)),
+      largeText: Boolean(Number(settingsRows[0]?.largeText)),
+      reminderVoice: Boolean(Number(settingsRows[0]?.reminderVoice)),
+      reducedMotion: Boolean(Number(settingsRows[0]?.reducedMotion)),
+      caregiverDigestEnabled: Boolean(Number(settingsRows[0]?.caregiverDigestEnabled)),
+    },
+    reminders: reminderRows.map((item) => ({
+      ...item,
+      enabled: Boolean(Number(item.enabled)),
+    })),
+    conversations: conversationRows,
+    events: eventRows.map((item) => ({
+      ...item,
+      meta: (() => {
+        try {
+          return item.meta ? JSON.parse(item.meta) : {};
+        } catch {
+          return {};
+        }
+      })(),
+    })),
+  });
+}
+
+async function writeSqliteStore(store, dbFile = SQLITE_FILE) {
+  await ensureSqliteStore(dbFile);
+  await persistSqliteStore(store, dbFile);
+}
+
+async function persistSqliteStore(store, dbFile = SQLITE_FILE) {
+  const normalized = normalizeStore(store);
+
+  const reminderStatements = normalized.reminders.map(
+    (item) =>
+      [
+        "INSERT INTO reminders (id, title, time, repeat, schedule_date, enabled, last_triggered_at, last_triggered_date, created_at) VALUES (",
+        [
+          sqlQuote(item.id),
+          sqlQuote(item.title),
+          sqlQuote(item.time),
+          sqlQuote(item.repeat),
+          sqlQuote(item.scheduleDate),
+          sqlBool(item.enabled),
+          sqlQuote(item.lastTriggeredAt),
+          sqlQuote(item.lastTriggeredDate),
+          sqlQuote(item.createdAt),
+        ].join(", "),
+        ");",
+      ].join("")
+  );
+
+  const conversationStatements = normalized.conversations.map(
+    (item) =>
+      [
+        "INSERT INTO conversations (id, role, content, source, created_at) VALUES (",
+        [
+          sqlQuote(item.id),
+          sqlQuote(item.role),
+          sqlQuote(item.content),
+          sqlQuote(item.source),
+          sqlQuote(item.createdAt),
+        ].join(", "),
+        ");",
+      ].join("")
+  );
+
+  const eventStatements = normalized.events.map(
+    (item) =>
+      [
+        "INSERT INTO events (id, type, level, message, meta, created_at) VALUES (",
+        [
+          sqlQuote(item.id),
+          sqlQuote(item.type),
+          sqlQuote(item.level),
+          sqlQuote(item.message),
+          sqlQuote(JSON.stringify(item.meta || {})),
+          sqlQuote(item.createdAt),
+        ].join(", "),
+        ");",
+      ].join("")
+  );
+
+  const sql = [
+    "BEGIN IMMEDIATE;",
+    "DELETE FROM profile;",
+    [
+      "INSERT INTO profile (id, name, age, preferences, notes, address, location, emergency_contact_name, emergency_contact_phone, caregiver_name, caregiver_phone, caregiver_relation, caregiver_webhook_url) VALUES (1,",
+      [
+        sqlQuote(normalized.profile.name),
+        sqlQuote(normalized.profile.age),
+        sqlQuote(normalized.profile.preferences),
+        sqlQuote(normalized.profile.notes),
+        sqlQuote(normalized.profile.address),
+        sqlQuote(normalized.profile.location),
+        sqlQuote(normalized.profile.emergencyContactName),
+        sqlQuote(normalized.profile.emergencyContactPhone),
+        sqlQuote(normalized.profile.caregiverName),
+        sqlQuote(normalized.profile.caregiverPhone),
+        sqlQuote(normalized.profile.caregiverRelation),
+        sqlQuote(normalized.profile.caregiverWebhookUrl),
+      ].join(", "),
+      ");",
+    ].join(""),
+    "DELETE FROM settings;",
+    [
+      "INSERT INTO settings (id, auto_speak, large_text, reminder_voice, interface_mode, reduced_motion, caregiver_digest_enabled, caregiver_digest_hour, last_digest_date) VALUES (1,",
+      [
+        sqlBool(normalized.settings.autoSpeak),
+        sqlBool(normalized.settings.largeText),
+        sqlBool(normalized.settings.reminderVoice),
+        sqlQuote(normalized.settings.interfaceMode || "elder"),
+        sqlBool(normalized.settings.reducedMotion),
+        sqlBool(normalized.settings.caregiverDigestEnabled),
+        sqlQuote(normalized.settings.caregiverDigestHour || "08:30"),
+        sqlQuote(normalized.settings.lastDigestDate || ""),
+      ].join(", "),
+      ");",
+    ].join(""),
+    "DELETE FROM reminders;",
+    ...reminderStatements,
+    "DELETE FROM conversations;",
+    ...conversationStatements,
+    "DELETE FROM events;",
+    ...eventStatements,
+    "COMMIT;",
+  ].join("\n");
+
+  await sqliteRun(dbFile, sql);
+}

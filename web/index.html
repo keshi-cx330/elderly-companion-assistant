@@ -55,6 +55,29 @@
             <div id="quick-actions" class="quick-actions"></div>
           </div>
 
+          <div class="section-card briefing-card">
+            <div class="panel-head">
+              <h2>今日晨间播报</h2>
+              <p id="briefing-meta">正在整理今天天气、安排和暖心资讯...</p>
+            </div>
+            <div id="briefing-summary" class="briefing-summary">加载中</div>
+            <div class="briefing-grid">
+              <article class="briefing-stat">
+                <span>实时天气</span>
+                <strong id="briefing-weather">加载中</strong>
+              </article>
+              <article class="briefing-stat">
+                <span>今日安排</span>
+                <strong id="briefing-reminder">加载中</strong>
+              </article>
+            </div>
+            <div id="briefing-news" class="briefing-news"></div>
+            <div class="composer-actions">
+              <button id="briefing-play" type="button" class="ghost-btn">播放晨间播报</button>
+              <button id="briefing-refresh" type="button" class="ghost-btn">刷新今日资讯</button>
+            </div>
+          </div>
+
           <div id="chat-list" class="chat-list" aria-live="polite"></div>
 
           <div class="section-card composer-card">
@@ -148,6 +171,10 @@
               常住地址
               <textarea id="profile-address" rows="2" maxlength="120" placeholder="例如：上海市浦东新区示例路 18 号 2 单元"></textarea>
             </label>
+            <label>
+              所在城市 / 区县
+              <input id="profile-location" type="text" maxlength="40" placeholder="例如：上海浦东新区" />
+            </label>
 
             <div class="two-col">
               <label>
@@ -157,6 +184,38 @@
               <label>
                 联系电话
                 <input id="profile-contact-phone" type="tel" maxlength="20" placeholder="手机号" />
+              </label>
+            </div>
+
+            <div class="panel-head sub-head">
+              <h2>家属联动</h2>
+              <p>用于紧急通知和每日安心摘要，可对接企业微信、钉钉或自动化 webhook。</p>
+            </div>
+
+            <div class="two-col">
+              <label>
+                家属称谓
+                <input id="profile-caregiver-relation" type="text" maxlength="20" placeholder="例如：儿子" />
+              </label>
+              <label>
+                家属姓名
+                <input id="profile-caregiver-name" type="text" maxlength="30" placeholder="例如：李先生" />
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label>
+                家属电话
+                <input id="profile-caregiver-phone" type="tel" maxlength="20" placeholder="例如：13800000000" />
+              </label>
+              <label>
+                通知 Webhook
+                <input
+                  id="profile-caregiver-webhook"
+                  type="url"
+                  maxlength="300"
+                  placeholder="选填，例如企业微信/钉钉/n8n 的 webhook"
+                />
               </label>
             </div>
 
@@ -173,6 +232,25 @@
                 <span>提醒播报</span>
                 <input id="settings-reminder-voice" type="checkbox" />
               </label>
+              <label>
+                界面模式
+                <select id="settings-interface-mode">
+                  <option value="elder">长辈暖心模式</option>
+                  <option value="family">家属专业模式</option>
+                </select>
+              </label>
+              <label class="switch-row">
+                <span>减少动画</span>
+                <input id="settings-reduced-motion" type="checkbox" />
+              </label>
+              <label class="switch-row">
+                <span>每日家属摘要</span>
+                <input id="settings-caregiver-digest" type="checkbox" />
+              </label>
+              <label>
+                摘要时间
+                <input id="settings-caregiver-digest-hour" type="time" />
+              </label>
             </div>
 
             <button type="submit" class="primary-btn">保存资料与设置</button>
@@ -180,6 +258,37 @@
         </section>
 
         <section id="panel-family" class="panel" aria-label="家属面板">
+          <div class="section-card">
+            <div class="panel-head">
+              <h2>家属联动</h2>
+              <p>支持测试通知、发送安心摘要，以及查看当前通知链路状态。</p>
+            </div>
+
+            <div class="summary-grid">
+              <article>
+                <p class="summary-key">通知状态</p>
+                <p id="caregiver-status" class="summary-text">加载中</p>
+              </article>
+              <article>
+                <p class="summary-key">摘要时间</p>
+                <p id="caregiver-digest-time" class="summary-text">-</p>
+              </article>
+              <article>
+                <p class="summary-key">Webhook 数量</p>
+                <p id="caregiver-webhook-count" class="summary-value">0</p>
+              </article>
+              <article>
+                <p class="summary-key">家属联系人</p>
+                <p id="caregiver-contact" class="summary-text">-</p>
+              </article>
+            </div>
+
+            <div class="composer-actions">
+              <button id="send-digest" type="button" class="ghost-btn">发送安心摘要</button>
+              <button id="test-caregiver-notify" type="button" class="ghost-btn">测试家属通知</button>
+            </div>
+          </div>
+
           <div class="section-card">
             <div class="panel-head">
               <h2>家属查看</h2>

@@ -95,13 +95,22 @@ test("profile and settings should persist", async () => {
       preferences: "听戏、散步",
       notes: "糖尿病患者",
       address: "北京市海淀区学院路 1 号",
+      location: "北京海淀",
       emergencyContactName: "张先生",
       emergencyContactPhone: "13900000000",
+      caregiverRelation: "儿子",
+      caregiverName: "张先生",
+      caregiverPhone: "13900000000",
+      caregiverWebhookUrl: "",
     };
     const settingsPayload = {
       autoSpeak: false,
       largeText: true,
       reminderVoice: false,
+      interfaceMode: "family",
+      reducedMotion: true,
+      caregiverDigestEnabled: true,
+      caregiverDigestHour: "09:00",
     };
 
     const profileRes = await ctx.request("/api/profile", {
@@ -119,8 +128,13 @@ test("profile and settings should persist", async () => {
     const bootstrap = await ctx.request("/api/bootstrap");
     assert.equal(bootstrap.data.profile.name, "张阿姨");
     assert.equal(bootstrap.data.profile.address, "北京市海淀区学院路 1 号");
+    assert.equal(bootstrap.data.profile.location, "北京海淀");
     assert.equal(bootstrap.data.settings.autoSpeak, false);
     assert.equal(bootstrap.data.settings.reminderVoice, false);
+    assert.equal(bootstrap.data.settings.interfaceMode, "family");
+    assert.equal(bootstrap.data.settings.reducedMotion, true);
+    assert.equal(bootstrap.data.settings.caregiverDigestEnabled, true);
+    assert.equal(bootstrap.data.settings.caregiverDigestHour, "09:00");
   } finally {
     await ctx.close();
   }
@@ -171,6 +185,39 @@ test("chat endpoint should detect emergency expressions and leave logs", async (
     assert.equal(logs.response.status, 200);
     assert.ok(logs.data.logs.length >= 1);
     assert.match(logs.data.logs[0].message, /高风险表达|紧急上报/);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("briefing and caregiver endpoints should return fallback-friendly data", async () => {
+  const ctx = await startServer();
+  try {
+    await ctx.request("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify({
+        location: "",
+        caregiverName: "李女士",
+        caregiverRelation: "女儿",
+      }),
+    });
+
+    const briefing = await ctx.request("/api/briefing");
+    assert.equal(briefing.response.status, 200);
+    assert.equal(typeof briefing.data.briefing.summary, "string");
+    assert.equal(typeof briefing.data.briefing.reminderSummary, "string");
+    assert.equal(typeof briefing.data.caregiver.digestHour, "string");
+
+    const caregiverStatus = await ctx.request("/api/caregiver/status");
+    assert.equal(caregiverStatus.response.status, 200);
+    assert.equal(caregiverStatus.data.caregiver.contact.name, "李女士");
+
+    const notifyTest = await ctx.request("/api/caregiver/notify-test", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    assert.equal(notifyTest.response.status, 200);
+    assert.equal(notifyTest.data.result.attempted, false);
   } finally {
     await ctx.close();
   }

@@ -58,12 +58,24 @@ OPENAI_TTS_VOICE="alloy" \
 npm start
 ```
 
+如果要启用更稳的 SQLite 存储和家属通知：
+```bash
+HOST=0.0.0.0 \
+PORT=3000 \
+STORAGE_DRIVER=sqlite \
+SQLITE_FILE=/opt/elderly-companion-assistant/data/store.db \
+NOTIFY_WEBHOOK_URLS="https://example.com/webhook-a,https://example.com/webhook-b" \
+npm start
+```
+
 说明：
 - 普通聊天会优先走 DeepSeek
 - 提醒创建和紧急识别仍由本地逻辑处理
 - Prompt 会从 `config/agent-prompt.json` 动态读取，可按场景调整
 - 如配置 `OPENAI_*` 语音环境变量，手机端语音会优先走云端 ASR / TTS
 - 云端语音失败时，浏览器播报会自动兜底
+- 如启用 `SQLite`，项目会优先使用 `sqlite3` 持久化提醒、日志和资料
+- 如配置 `NOTIFY_WEBHOOK_URLS` 或前端资料页中的家属 webhook，紧急事件和安心摘要可自动发送给家属
 
 ## 6. systemd 服务
 创建文件：
@@ -90,6 +102,9 @@ Environment=OPENAI_BASE_URL=https://api.openai.com/v1
 Environment=OPENAI_ASR_MODEL=gpt-4o-mini-transcribe
 Environment=OPENAI_TTS_MODEL=gpt-4o-mini-tts
 Environment=OPENAI_TTS_VOICE=alloy
+Environment=STORAGE_DRIVER=sqlite
+Environment=SQLITE_FILE=/opt/elderly-companion-assistant/data/store.db
+Environment=NOTIFY_WEBHOOK_URLS=https://example.com/caregiver-webhook
 ExecStart=/usr/bin/node /opt/elderly-companion-assistant/server.js
 Restart=always
 RestartSec=3
@@ -145,16 +160,18 @@ sudo certbot --nginx -d your-domain.com
 ```bash
 curl http://127.0.0.1:3000/api/health
 curl http://127.0.0.1:3000/api/ai/prompt
+curl http://127.0.0.1:3000/api/briefing
 ```
 
 返回 `ok: true` 即表示服务可用。
 
 ## 11. 数据说明
 - 数据保存在 `data/store.json`
+- 如果启用 `SQLite`，则保存在 `data/store.db`
 - 如 JSON 损坏，服务会自动备份损坏文件并重新生成默认结构
 
 ## 12. 安全建议
 - 生产环境启用 HTTPS
 - 限制服务器安全组，仅开放必要端口
-- 定期备份 `data/store.json`
+- 定期备份 `data/store.json` 或 `data/store.db`
 - 如需公网演示，建议绑定域名而不是直接暴露 IP

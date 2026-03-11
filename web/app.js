@@ -4,11 +4,31 @@ const state = {
     autoSpeak: true,
     largeText: true,
     reminderVoice: true,
+    interfaceMode: "elder",
+    reducedMotion: false,
+    caregiverDigestEnabled: false,
+    caregiverDigestHour: "08:30",
   },
   reminders: [],
   logs: [],
   conversations: [],
   dashboard: {},
+  briefing: {
+    summary: "正在生成今日晨间播报...",
+    weather: null,
+    news: {
+      items: [],
+    },
+    reminderSummary: "",
+  },
+  caregiver: {
+    configured: false,
+    contact: {},
+    webhookCount: 0,
+    digestEnabled: false,
+    digestHour: "08:30",
+    lastDigestDate: "",
+  },
   ai: {
     chatConfigured: false,
     chatProviderLabel: "本地规则回复",
@@ -58,11 +78,33 @@ const refs = {
   profilePreferences: document.querySelector("#profile-preferences"),
   profileNotes: document.querySelector("#profile-notes"),
   profileAddress: document.querySelector("#profile-address"),
+  profileLocation: document.querySelector("#profile-location"),
   profileContactName: document.querySelector("#profile-contact-name"),
   profileContactPhone: document.querySelector("#profile-contact-phone"),
+  profileCaregiverRelation: document.querySelector("#profile-caregiver-relation"),
+  profileCaregiverName: document.querySelector("#profile-caregiver-name"),
+  profileCaregiverPhone: document.querySelector("#profile-caregiver-phone"),
+  profileCaregiverWebhook: document.querySelector("#profile-caregiver-webhook"),
   settingsAutoSpeak: document.querySelector("#settings-auto-speak"),
   settingsLargeText: document.querySelector("#settings-large-text"),
   settingsReminderVoice: document.querySelector("#settings-reminder-voice"),
+  settingsInterfaceMode: document.querySelector("#settings-interface-mode"),
+  settingsReducedMotion: document.querySelector("#settings-reduced-motion"),
+  settingsCaregiverDigest: document.querySelector("#settings-caregiver-digest"),
+  settingsCaregiverDigestHour: document.querySelector("#settings-caregiver-digest-hour"),
+  briefingMeta: document.querySelector("#briefing-meta"),
+  briefingSummary: document.querySelector("#briefing-summary"),
+  briefingWeather: document.querySelector("#briefing-weather"),
+  briefingReminder: document.querySelector("#briefing-reminder"),
+  briefingNews: document.querySelector("#briefing-news"),
+  briefingPlay: document.querySelector("#briefing-play"),
+  briefingRefresh: document.querySelector("#briefing-refresh"),
+  caregiverStatus: document.querySelector("#caregiver-status"),
+  caregiverDigestTime: document.querySelector("#caregiver-digest-time"),
+  caregiverWebhookCount: document.querySelector("#caregiver-webhook-count"),
+  caregiverContact: document.querySelector("#caregiver-contact"),
+  sendDigest: document.querySelector("#send-digest"),
+  testCaregiverNotify: document.querySelector("#test-caregiver-notify"),
   sumChat: document.querySelector("#sum-chat"),
   sumEmergency: document.querySelector("#sum-emergency"),
   sumReminder: document.querySelector("#sum-reminder"),
@@ -259,10 +301,17 @@ function setPanel(target) {
 
 function applySettingsToUi() {
   document.body.classList.toggle("large-text", Boolean(state.settings.largeText));
+  document.body.classList.toggle("mode-elder", (state.settings.interfaceMode || "elder") === "elder");
+  document.body.classList.toggle("mode-family", (state.settings.interfaceMode || "elder") === "family");
+  document.body.classList.toggle("reduced-motion", Boolean(state.settings.reducedMotion));
   refs.heroVoiceMode.textContent = state.settings.autoSpeak ? "已开启" : "已关闭";
   refs.settingsAutoSpeak.checked = Boolean(state.settings.autoSpeak);
   refs.settingsLargeText.checked = Boolean(state.settings.largeText);
   refs.settingsReminderVoice.checked = Boolean(state.settings.reminderVoice);
+  refs.settingsInterfaceMode.value = state.settings.interfaceMode || "elder";
+  refs.settingsReducedMotion.checked = Boolean(state.settings.reducedMotion);
+  refs.settingsCaregiverDigest.checked = Boolean(state.settings.caregiverDigestEnabled);
+  refs.settingsCaregiverDigestHour.value = state.settings.caregiverDigestHour || "08:30";
 }
 
 function fillProfileForm() {
@@ -271,8 +320,13 @@ function fillProfileForm() {
   refs.profilePreferences.value = state.profile.preferences || "";
   refs.profileNotes.value = state.profile.notes || "";
   refs.profileAddress.value = state.profile.address || "";
+  refs.profileLocation.value = state.profile.location || "";
   refs.profileContactName.value = state.profile.emergencyContactName || "";
   refs.profileContactPhone.value = state.profile.emergencyContactPhone || "";
+  refs.profileCaregiverRelation.value = state.profile.caregiverRelation || "";
+  refs.profileCaregiverName.value = state.profile.caregiverName || "";
+  refs.profileCaregiverPhone.value = state.profile.caregiverPhone || "";
+  refs.profileCaregiverWebhook.value = state.profile.caregiverWebhookUrl || "";
 }
 
 function updateHero() {
@@ -280,6 +334,45 @@ function updateHero() {
   refs.heroContactName.textContent = state.profile.emergencyContactName || "未设置";
   refs.heroAddress.textContent = state.profile.address || "未设置";
   refs.heroVoiceMode.textContent = state.settings.autoSpeak ? "已开启" : "已关闭";
+}
+
+function renderBriefing() {
+  const briefing = state.briefing || {};
+  refs.briefingMeta.textContent =
+    briefing.generatedAt ? `更新于 ${formatDateTime(briefing.generatedAt)}` : "整理今天天气、安排和暖心资讯";
+  refs.briefingSummary.textContent = briefing.summary || "今天先慢一点，我来帮您整理安排。";
+  refs.briefingWeather.textContent = briefing.weather?.summary || "还没查到天气";
+  refs.briefingReminder.textContent = briefing.reminderSummary || "今天暂时没有待办提醒";
+  refs.briefingNews.innerHTML = "";
+
+  const items = Array.isArray(briefing.news?.items) ? briefing.news.items.slice(0, 3) : [];
+  if (!items.length) {
+    refs.briefingNews.innerHTML = '<article class="news-item">还没有新的暖心资讯，稍后刷新试试。</article>';
+    return;
+  }
+
+  items.forEach((item) => {
+    const article = document.createElement("article");
+    article.className = "news-item";
+    article.appendChild(createTextNode("strong", item.title || "暖心资讯"));
+    article.appendChild(createTextNode("span", item.source || "晨间播报"));
+    refs.briefingNews.appendChild(article);
+  });
+}
+
+function renderCaregiverStatus() {
+  const caregiver = state.caregiver || {};
+  refs.caregiverStatus.textContent = caregiver.configured
+    ? caregiver.webhookCount
+      ? "已接通自动通知"
+      : "已设置家属联系人，尚未接 webhook"
+    : "尚未配置家属通知";
+  refs.caregiverDigestTime.textContent = caregiver.digestEnabled
+    ? `${caregiver.digestHour || "08:30"} 自动准备摘要`
+    : "当前未开启每日摘要";
+  refs.caregiverWebhookCount.textContent = String(caregiver.webhookCount || 0);
+  const contactParts = [caregiver.contact?.relation, caregiver.contact?.name, caregiver.contact?.phone].filter(Boolean);
+  refs.caregiverContact.textContent = contactParts.length ? contactParts.join(" · ") : "未设置";
 }
 
 function renderQuickActions(actions = state.quickActions) {
@@ -830,6 +923,10 @@ async function refreshOverview() {
     ...state.settings,
     ...(data.settings || {}),
   };
+  state.caregiver = {
+    ...state.caregiver,
+    ...(data.caregiver || {}),
+  };
   state.reminders = data.reminders || [];
   state.conversations = data.conversations || [];
   state.dashboard = data.dashboard || {};
@@ -843,8 +940,23 @@ async function refreshOverview() {
   renderAgenda();
   renderReminders();
   renderDashboard();
+  renderCaregiverStatus();
   renderLogs();
   updateVoiceUi();
+}
+
+async function loadBriefing() {
+  const data = await api("/api/briefing");
+  state.briefing = {
+    ...state.briefing,
+    ...(data.briefing || {}),
+  };
+  state.caregiver = {
+    ...state.caregiver,
+    ...(data.caregiver || {}),
+  };
+  renderBriefing();
+  renderCaregiverStatus();
 }
 
 async function loadLogs() {
@@ -872,6 +984,20 @@ async function submitChat(message, source = "text") {
     appendChatBubble("assistant", data.reply || "我收到啦。");
     state.quickActions = Array.isArray(data.suggestions) && data.suggestions.length ? data.suggestions : state.quickActions;
     renderQuickActions(state.quickActions);
+    if (data.briefing) {
+      state.briefing = {
+        ...state.briefing,
+        ...(data.briefing.weather ? { weather: data.briefing.weather } : {}),
+        ...(data.briefing.news ? { news: data.briefing.news } : {}),
+      };
+      if (data.intent === "daily_briefing" && data.briefing.summary) {
+        state.briefing = {
+          ...state.briefing,
+          ...data.briefing,
+        };
+      }
+      renderBriefing();
+    }
     void speak(data.reply || "", "reply");
 
     if (data.reminder) {
@@ -948,13 +1074,22 @@ function bindForms() {
         preferences: refs.profilePreferences.value,
         notes: refs.profileNotes.value,
         address: refs.profileAddress.value,
+        location: refs.profileLocation.value,
         emergencyContactName: refs.profileContactName.value,
         emergencyContactPhone: refs.profileContactPhone.value,
+        caregiverRelation: refs.profileCaregiverRelation.value,
+        caregiverName: refs.profileCaregiverName.value,
+        caregiverPhone: refs.profileCaregiverPhone.value,
+        caregiverWebhookUrl: refs.profileCaregiverWebhook.value,
       };
       const settingsPayload = {
         autoSpeak: refs.settingsAutoSpeak.checked,
         largeText: refs.settingsLargeText.checked,
         reminderVoice: refs.settingsReminderVoice.checked,
+        interfaceMode: refs.settingsInterfaceMode.value,
+        reducedMotion: refs.settingsReducedMotion.checked,
+        caregiverDigestEnabled: refs.settingsCaregiverDigest.checked,
+        caregiverDigestHour: refs.settingsCaregiverDigestHour.value,
       };
 
       await api("/api/profile", {
@@ -967,6 +1102,7 @@ function bindForms() {
       });
       await refreshOverview();
       showToast("资料与设置已保存");
+      await loadBriefing();
     } catch (error) {
       showToast(error.message);
     }
@@ -1024,6 +1160,45 @@ function bindForms() {
   });
 
   refs.closeEmergency.addEventListener("click", closeEmergencyModal);
+
+  refs.briefingPlay.addEventListener("click", () => {
+    void speak(state.briefing.summary || "我来陪您慢慢看今天的安排。", "reply");
+  });
+
+  refs.briefingRefresh.addEventListener("click", async () => {
+    try {
+      await loadBriefing();
+      showToast("今日播报已更新");
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
+
+  refs.sendDigest.addEventListener("click", async () => {
+    try {
+      const data = await api("/api/caregiver/digest", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      await refreshOverview();
+      showToast(data.result?.delivered ? "安心摘要已发送" : "没有可用 webhook，摘要未实际送出");
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
+
+  refs.testCaregiverNotify.addEventListener("click", async () => {
+    try {
+      const data = await api("/api/caregiver/notify-test", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      await refreshOverview();
+      showToast(data.result?.delivered ? "家属通知测试成功" : "通知测试已记录，但没有实际送达");
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
 }
 
 function shouldTriggerReminder(reminder, now) {
@@ -1095,6 +1270,7 @@ async function boot() {
 
   try {
     await refreshOverview();
+    await loadBriefing();
     renderQuickActions(state.quickActions);
     setHeroStatus(currentSpeechSummary());
   } catch (error) {

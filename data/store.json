@@ -6,13 +6,23 @@
     "preferences": "喜欢聊天、散步、听戏曲",
     "notes": "有高血压史，外出会携带常用药。",
     "address": "上海市浦东新区示例路 18 号 2 单元",
+    "location": "上海浦东新区",
     "emergencyContactName": "李先生",
-    "emergencyContactPhone": "13800000000"
+    "emergencyContactPhone": "13800000000",
+    "caregiverName": "李先生",
+    "caregiverPhone": "13800000000",
+    "caregiverRelation": "儿子",
+    "caregiverWebhookUrl": ""
   },
   "settings": {
     "autoSpeak": true,
     "largeText": true,
-    "reminderVoice": true
+    "reminderVoice": true,
+    "interfaceMode": "elder",
+    "reducedMotion": false,
+    "caregiverDigestEnabled": false,
+    "caregiverDigestHour": "08:30",
+    "lastDigestDate": ""
   },
   "reminders": [],
   "conversations": [

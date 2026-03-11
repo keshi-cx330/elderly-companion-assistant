@@ -11,14 +11,17 @@
 - 提醒闭环：支持手动创建提醒，也支持自然语言直接创建，例如“每天早上 8 点提醒我吃药”。
 - 紧急求助：识别胸痛、摔倒、救命、昏迷等高风险表达，自动弹出求助流程并留痕。
 - 家属视图：提供统计概览、筛选日志、最近高风险事件提示。
+- 晨间播报：支持聚合实时天气、暖心资讯和今日提醒，生成一键可播报的晨间摘要。
+- 家属通知：支持一键测试、手动发送安心摘要，并可通过 webhook 接入企业微信、钉钉、n8n 等通知链路。
 - 老人友好：大字模式、按钮大、操作少、单屏核心动作明确。
 - PWA 化：支持加到手机桌面，缓存页面外壳，弱网下仍可保留基础界面。
 - 云端语音：支持通过 OpenAI 兼容语音接口接入云端 ASR + TTS，浏览器能力不可用时可自动回退。
+- 存储升级：默认保留 JSON 零依赖运行，同时支持切换到 SQLite 持久化。
 
 ## 技术栈
 - 后端：`Node.js 18+` 原生 `http`，无第三方依赖
 - 前端：原生 HTML / CSS / JavaScript
-- 存储：本地 JSON 文件持久化
+- 存储：本地 JSON 文件持久化，或可选 SQLite
 - 部署：Linux + `systemd` + `Nginx` 推荐
 
 ## 快速启动
@@ -123,6 +126,59 @@ npm start
 - `OPENAI_TTS_RESPONSE_FORMAT`：默认 `mp3`
 - `OPENAI_SPEECH_TIMEOUT_MS`：默认 `20000`
 
+## 实时天气 / 晨间播报
+项目新增了 `GET /api/briefing`，会聚合：
+- 实时天气
+- 今日提醒摘要
+- 正向资讯筛选
+
+默认依赖：
+- 天气：`Open-Meteo`
+- 资讯：`Google News RSS` 搜索结果，失败时自动回退到本地暖心资讯
+
+可选环境变量：
+- `OPEN_METEO_BASE_URL`
+- `OPEN_METEO_GEOCODE_URL`
+- `WEATHER_TIMEOUT_MS`
+- `NEWS_RSS_URL`
+- `NEWS_TIMEOUT_MS`
+- `BRIEFING_CACHE_TTL_MS`
+
+## 家属通知链路
+项目新增：
+- `POST /api/caregiver/notify-test`：测试家属通知
+- `POST /api/caregiver/digest`：发送安心摘要
+- `GET /api/caregiver/status`：查看家属配置状态
+
+通知方式：
+- 项目级 webhook：`NOTIFY_WEBHOOK_URLS`
+- 老人资料页中的家属 `Webhook`
+
+适合对接：
+- 企业微信机器人
+- 钉钉机器人
+- n8n / Zapier / Make
+- 自建短信或电话网关
+
+可选环境变量：
+- `NOTIFY_WEBHOOK_URLS`：逗号分隔多个 webhook
+- `NOTIFY_TIMEOUT_MS`
+
+## SQLite 持久化
+如果你要把项目从演示级提升到更稳的部署方式，建议启用 SQLite：
+
+```bash
+cd /root/kkk/项目
+export STORAGE_DRIVER="sqlite"
+export SQLITE_FILE="/root/kkk/项目/data/store.db"
+npm start
+```
+
+可选环境变量：
+- `STORAGE_DRIVER`：`json` 或 `sqlite`
+- `SQLITE_FILE`
+- `SQLITE_BIN`：默认 `sqlite3`
+
 ## TTS / ASR 说明
 当前项目已经具备：
 - `ASR`：浏览器 Web Speech API 语音识别
@@ -180,6 +236,10 @@ npm test
 - `POST /api/speech/transcribe`
 - `POST /api/speech/speak`
 - `POST /api/emergency/report`
+- `GET /api/briefing`
+- `GET /api/caregiver/status`
+- `POST /api/caregiver/notify-test`
+- `POST /api/caregiver/digest`
 - `GET /api/dashboard`
 - `GET /api/logs`
 
