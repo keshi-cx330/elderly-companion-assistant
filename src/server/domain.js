@@ -54,25 +54,37 @@ function shiftDate(baseDate, days) {
   return copy.toISOString().slice(0, 10);
 }
 
-function parseReminderIntent(message, now = new Date()) {
+const reminderPatterns = [
+  /^(?:(每天|每日|今天|明天)\s*)?(?:(早上|上午|中午|下午|傍晚|晚上|凌晨|今晚)\s*)?(\d{1,2})(?:(?:\s*[:：]\s*(\d{1,2}))|(?:\s*[点时]\s*(\d{1,2})?))?(?:\s*分)?\s*(?:提醒我|叫我|记得|帮我记得)\s*(.+)$/,
+  /^(?:提醒我|叫我|记得|帮我记得)\s*(?:(每天|每日|今天|明天)\s*)?(?:(早上|上午|中午|下午|傍晚|晚上|凌晨|今晚)\s*)?(\d{1,2})(?:(?:\s*[:：]\s*(\d{1,2}))|(?:\s*[点时]\s*(\d{1,2})?))?(?:\s*分)?\s*(.+)$/,
+];
+
+function splitReminderTitles(titleRaw) {
+  const title = safeText(String(titleRaw || "").replace(/^(一下|一声|我|去|要)\s*/g, ""), 120);
+  if (!title) return [];
+
+  const items = title
+    .split(/\s*(?:、|\/|和|以及|还有|并且|并|同时|,|，)\s*/g)
+    .map((item) => safeText(item, 40))
+    .filter(Boolean);
+
+  return [...new Set(items)].slice(0, 6);
+}
+
+function parseReminderClause(message, now = new Date(), inheritedDayWord = "") {
   const text = safeText(message, 200);
   if (!text || !/(提醒|叫我|记得|帮我记得)/.test(text)) return null;
 
-  const patterns = [
-    /^(?:(每天|每日|今天|明天)\s*)?(?:(早上|上午|中午|下午|傍晚|晚上|凌晨|今晚)\s*)?(\d{1,2})(?:(?:\s*[:：]\s*(\d{1,2}))|(?:\s*[点时]\s*(\d{1,2})?))?(?:\s*分)?\s*(?:提醒我|叫我|记得|帮我记得)\s*(.+)$/,
-    /^(?:提醒我|叫我|记得|帮我记得)\s*(?:(每天|每日|今天|明天)\s*)?(?:(早上|上午|中午|下午|傍晚|晚上|凌晨|今晚)\s*)?(\d{1,2})(?:(?:\s*[:：]\s*(\d{1,2}))|(?:\s*[点时]\s*(\d{1,2})?))?(?:\s*分)?\s*(.+)$/,
-  ];
-
-  for (const pattern of patterns) {
+  for (const pattern of reminderPatterns) {
     const match = text.match(pattern);
     if (!match) continue;
 
     const [, dayWordRaw = "", period = "", hourRaw = "", minuteRaw = "", minuteAltRaw = "", titleRaw = ""] = match;
     const time = normalizeClock(period, hourRaw, minuteRaw || minuteAltRaw);
-    const title = safeText(titleRaw.replace(/^(一下|一声|我|去|要)\s*/g, ""), 40);
+    const title = safeText(titleRaw.replace(/^(一下|一声|我|去|要)\s*/g, ""), 120);
     if (!time || !title) return null;
 
-    const dayWord = dayWordRaw || "";
+    const dayWord = dayWordRaw || inheritedDayWord || "";
     const repeat = dayWord === "每天" || dayWord === "每日" ? "daily" : "once";
     let scheduleDate = "";
 
@@ -93,10 +105,72 @@ function parseReminderIntent(message, now = new Date()) {
       repeat,
       scheduleDate,
       sourceText: text,
+      dayWord,
     };
   }
 
   return null;
+}
+
+function parseReminderIntents(message, now = new Date()) {
+  const text = safeText(message, 240);
+  if (!text || !/(提醒|叫我|记得|帮我记得)/.test(text)) return [];
+
+  const clauses = text
+    .split(/\s*(?:，|,|；|;|。|然后|接着|再)\s*/g)
+    .map((item) => safeText(item, 120))
+    .filter(Boolean);
+  const hasMultipleClauses = clauses.length > 1;
+
+  function expandIntent(intent) {
+    const titles = splitReminderTitles(intent.title);
+    if (!titles.length) return [];
+    return titles.map((title) => ({
+      title,
+      time: intent.time,
+      repeat: intent.repeat,
+      scheduleDate: intent.scheduleDate,
+      sourceText: intent.sourceText,
+      dayWord: intent.dayWord,
+    }));
+  }
+
+  if (!hasMultipleClauses) {
+    const parsed = parseReminderClause(text, now);
+    return parsed ? expandIntent(parsed) : [];
+  }
+
+  let inheritedDayWord = "";
+  const reminders = [];
+
+  clauses.forEach((clause) => {
+    let candidate = clause;
+    if (!/(提醒我|叫我|记得|帮我记得)/.test(candidate)) {
+      const hasTimeExpression = /(?:(每天|每日|今天|明天)\s*)?(?:(早上|上午|中午|下午|傍晚|晚上|凌晨|今晚)\s*)?\d{1,2}(?:(?:\s*[:：]\s*\d{1,2})|(?:\s*[点时]\s*\d{0,2}))?/.test(
+        candidate
+      );
+      if (!hasTimeExpression) return;
+      const inheritedPrefix = inheritedDayWord && !/^(每天|每日|今天|明天)/.test(candidate) ? `${inheritedDayWord} ` : "";
+      candidate = `提醒我 ${inheritedPrefix}${candidate}`;
+    }
+
+    const parsed = parseReminderClause(candidate, now, inheritedDayWord);
+    if (!parsed) return;
+    if (parsed.dayWord) inheritedDayWord = parsed.dayWord;
+    reminders.push(...expandIntent(parsed));
+  });
+
+  const seen = new Set();
+  return reminders.filter((item) => {
+    const key = `${item.title}|${item.time}|${item.repeat}|${item.scheduleDate}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseReminderIntent(message, now = new Date()) {
+  return parseReminderIntents(message, now)[0] || null;
 }
 
 const emergencyRules = [
@@ -105,24 +179,32 @@ const emergencyRules = [
     label: "疑似胸痛或呼吸困难",
     regex: /(胸痛|胸口痛|胸闷|喘不过气|呼吸困难|心慌|心悸|气短)/,
     steps: ["立即拨打 120 并说明地址与症状", "保持坐姿或半卧位，不要独自走动", "联系紧急联系人尽快到场"],
+    lead: "我在，先别硬撑。请马上坐下或半躺，尽量少走动，慢一点呼吸。",
+    followup: "胸痛和喘不过气不能拖，请先拨打 120。",
   },
   {
     type: "emergency_fall",
     label: "疑似跌倒或外伤",
     regex: /(摔倒|跌倒|出血|撞到头|骨折|起不来|流血)/,
     steps: ["先判断是否还能安全移动，避免强行站起", "拨打 120 或请邻居协助", "联系紧急联系人并说明受伤部位"],
+    lead: "我在，先别急着起身，避免再次受伤。",
+    followup: "如果起不来、出血明显或者撞到头，请优先叫人帮忙并拨打 120。",
   },
   {
     type: "emergency_neuro",
     label: "疑似意识或神经风险",
     regex: /(晕倒|昏迷|抽搐|意识不清|中风|口齿不清|半边无力)/,
     steps: ["立即拨打 120", "让周围人协助保持呼吸通畅", "准备门牌地址和既往病史信息"],
+    lead: "我在，先不要自己走动，也不要硬撑着站起来。",
+    followup: "这种情况有中风或意识风险，请立刻拨打 120。",
   },
   {
     type: "emergency_general",
     label: "疑似高风险紧急表达",
-    regex: /(救命|快不行了|紧急|急救|剧痛|疼得厉害|头晕厉害|肚子很痛)/,
+    regex: /(救命|(?:快|像是|可能)?不行了|紧急|急救|剧痛|疼得厉害|头晕厉害|肚子很痛)/,
     steps: ["立即拨打 120", "联系紧急联系人", "保持电话畅通，等待救援到达"],
+    lead: "我在，先别慌，先坐下或躺下，别自己走动。",
+    followup: "这种情况不能硬撑，如果还在加重，请马上拨打 120。",
   },
 ];
 
@@ -136,6 +218,54 @@ function detectEmergency(message) {
     label: matched.label,
     level: "high",
     steps: matched.steps,
+    lead: matched.lead,
+    followup: matched.followup,
+  };
+}
+
+const symptomRules = [
+  {
+    type: "symptom_dizzy",
+    label: "头晕头痛需要先稳住状态",
+    regex: /(头很晕|头晕|头疼|头痛|头昏|头晕眼花|脑袋晕|有点晕|站不稳)/,
+    steps: [
+      "先坐下或躺下，别自己走动",
+      "如果身边有温水，可以小口喝几口",
+      "如果方便，量一下血压或血糖",
+      "如果越来越重、说话不清、胸闷或手脚没力，马上拨打 120",
+    ],
+    reply:
+      "我在。您先别急，先坐下或者躺下，别自己走动。要是身边有温水，可以小口喝几口；如果方便，量一下血压或血糖。我会把这次情况记下来，并尽快提醒家里人。如果一会儿还在加重，或者出现胸闷、说话不清、手脚没力，请马上打120。",
+    suggestions: ["联系紧急联系人", "我现在胸痛，快不行了", "提醒我半小时后再看看状态"],
+  },
+  {
+    type: "symptom_abdominal",
+    label: "肚子疼先别硬撑",
+    regex: /(肚子疼|肚子痛|腹痛|胃疼|胃痛|胃不舒服|肚子不舒服)/,
+    steps: [
+      "先坐下或侧躺休息，别硬撑着活动",
+      "先别吃生冷、油腻食物，也不要自己乱吃药",
+      "如果不恶心不呕吐，可以小口喝一点温水",
+      "如果越来越疼、反复呕吐、发热或冒冷汗，马上联系家人并拨打 120",
+    ],
+    reply:
+      "我在。您先坐下或者侧躺休息一下，别硬撑着活动。先不要吃生冷油腻的东西，也别急着乱吃药；如果这会儿不恶心、不想吐，可以小口喝一点温水。我会把这次情况记下来，也会提醒家里人留意。如果疼得越来越厉害，或者开始发热、冒冷汗、一直吐，就别拖，马上打120。",
+    suggestions: ["联系紧急联系人", "提醒我一小时后再看看", "我现在胸痛，快不行了"],
+  },
+];
+
+function detectSymptomAlert(message) {
+  const text = safeText(message, 500);
+  const matched = symptomRules.find((rule) => rule.regex.test(text));
+  if (!matched) return null;
+
+  return {
+    type: matched.type,
+    label: matched.label,
+    level: "normal",
+    steps: matched.steps,
+    reply: matched.reply,
+    suggestions: matched.suggestions,
   };
 }
 
@@ -269,27 +399,71 @@ function timeGreeting(now = new Date()) {
   return "晚上好";
 }
 
-function buildAssistantResponse({ message, profile, reminderIntent, emergency, now = new Date() }) {
+function buildAssistantResponse({
+  message,
+  profile,
+  reminderIntent,
+  reminderIntents = [],
+  emergency,
+  symptomAlert,
+  canNotifyCaregiver = false,
+  caregiverName = "",
+  now = new Date(),
+}) {
   const text = safeText(message, 500);
   const preferences = safeText(profile?.preferences || "", 80);
+  const fallbackContactName = safeText(caregiverName || profile?.caregiverName || profile?.emergencyContactName || "", 30);
 
   if (emergency) {
-    const contact = profile?.emergencyContactName ? `，并联系${profile.emergencyContactName}` : "";
-    const address = profile?.address ? ` 您现在的登记地址是 ${profile.address}。` : "";
+    const contactLine = fallbackContactName
+      ? canNotifyCaregiver
+        ? `我也会同步提醒${fallbackContactName}留意您的情况。`
+        : `请尽快联系${fallbackContactName}。`
+      : "请马上联系身边能帮您的人。";
+    const address = profile?.address ? `登记地址是 ${profile.address}。` : "";
     return {
-      reply: `我检测到您可能正处于紧急状态，请立刻拨打 120${contact}。${address}我会把求助步骤放在屏幕上，您按顺序操作即可。`,
+      reply: `${emergency.lead || "我在，先别慌。"}${emergency.followup || "请立刻拨打 120。"}${contactLine}${address}`,
       suggestions: ["立即拨打 120", "联系紧急联系人", "大声呼叫附近的人"],
       intent: "emergency",
     };
   }
 
-  if (reminderIntent) {
-    const scheduleText =
-      reminderIntent.repeat === "daily"
-        ? `每天 ${reminderIntent.time}`
-        : `${reminderIntent.scheduleDate} ${reminderIntent.time}`;
+  if (symptomAlert) {
+    const notifyLine =
+      fallbackContactName && canNotifyCaregiver
+        ? `我也会同步提醒${fallbackContactName}留意您的情况。`
+        : fallbackContactName
+          ? `我建议您也给${fallbackContactName}打个电话，让家里人知道。`
+          : "如果身边有人，先请他陪着您。";
     return {
-      reply: `好的，我已经为您设置提醒：${scheduleText} 提醒您${reminderIntent.title}。到点后我会主动播报。`,
+      reply: `${symptomAlert.reply}${notifyLine}`,
+      suggestions: symptomAlert.suggestions || ["联系紧急联系人", "提醒我半小时后再看看", "立即拨打 120"],
+      intent: "symptom_guidance",
+    };
+  }
+
+  const reminderList = reminderIntents.length ? reminderIntents : reminderIntent ? [reminderIntent] : [];
+  if (reminderList.length) {
+    if (reminderList.length === 1) {
+      const scheduleText =
+        reminderList[0].repeat === "daily"
+          ? `每天 ${reminderList[0].time}`
+          : `${reminderList[0].scheduleDate} ${reminderList[0].time}`;
+      return {
+        reply: `好的，我已经为您设置提醒：${scheduleText} 提醒您${reminderList[0].title}。到点后我会主动播报。`,
+        suggestions: ["继续添加提醒", "查看今日安排", "更新紧急联系人"],
+        intent: "reminder_create",
+      };
+    }
+
+    const reminderLines = reminderList
+      .slice(0, 4)
+      .map((item) =>
+        item.repeat === "daily" ? `每天 ${item.time} 提醒${item.title}` : `${item.scheduleDate} ${item.time} 提醒${item.title}`
+      )
+      .join("；");
+    return {
+      reply: `好的，这次我帮您记住了 ${reminderList.length} 个提醒：${reminderLines}。到时间我会按条播报，不会只记住一项。`,
       suggestions: ["继续添加提醒", "查看今日安排", "更新紧急联系人"],
       intent: "reminder_create",
     };
@@ -349,9 +523,11 @@ module.exports = {
   createId,
   decorateReminder,
   detectEmergency,
+  detectSymptomAlert,
   isValidDate,
   isValidTime,
   parseReminderIntent,
+  parseReminderIntents,
   recentConversations,
   safeBoolean,
   safePhone,

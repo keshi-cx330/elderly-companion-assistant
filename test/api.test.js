@@ -166,13 +166,51 @@ test("chat endpoint should support natural language reminder creation", async ()
   }
 });
 
-test("chat endpoint should detect emergency expressions and leave logs", async () => {
+test("chat endpoint should support creating multiple reminders in one sentence", async () => {
   const ctx = await startServer();
   try {
     const chat = await ctx.request("/api/chat", {
       method: "POST",
       body: JSON.stringify({
-        message: "我现在胸痛，快不行了",
+        message: "每天早上8点提醒我吃药和喝水",
+        source: "voice",
+      }),
+    });
+
+    assert.equal(chat.response.status, 200);
+    assert.equal(chat.data.intent, "reminder_create");
+    assert.ok(Array.isArray(chat.data.reminders));
+    assert.equal(chat.data.reminders.length, 2);
+    assert.match(chat.data.reply, /2 个提醒/);
+
+    const reminders = await ctx.request("/api/reminders");
+    assert.equal(reminders.response.status, 200);
+    assert.equal(reminders.data.reminders.length, 2);
+    assert.deepEqual(
+      reminders.data.reminders.map((item) => item.title).sort(),
+      ["吃药", "喝水"]
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("chat endpoint should detect emergency expressions and leave logs", async () => {
+  const ctx = await startServer();
+  try {
+    await ctx.request("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify({
+        emergencyContactName: "张先生",
+        emergencyContactPhone: "13900000000",
+        address: "北京市海淀区学院路 1 号",
+      }),
+    });
+
+    const chat = await ctx.request("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message: "我现在头很晕，可能不行了",
         source: "text",
       }),
     });
@@ -180,11 +218,48 @@ test("chat endpoint should detect emergency expressions and leave logs", async (
     assert.equal(chat.response.status, 200);
     assert.ok(chat.data.emergency);
     assert.equal(chat.data.intent, "emergency");
+    assert.match(chat.data.reply, /我在|先别慌/);
+    assert.match(chat.data.reply, /先坐下|躺下/);
+    assert.equal(chat.data.notification.attempted, false);
 
     const logs = await ctx.request("/api/logs?type=emergency&level=high&limit=20");
     assert.equal(logs.response.status, 200);
     assert.ok(logs.data.logs.length >= 1);
     assert.match(logs.data.logs[0].message, /高风险表达|紧急上报/);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("chat endpoint should provide symptom guidance and leave symptom logs", async () => {
+  const ctx = await startServer();
+  try {
+    await ctx.request("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify({
+        emergencyContactName: "张先生",
+        emergencyContactPhone: "13900000000",
+      }),
+    });
+
+    const chat = await ctx.request("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message: "我有点头疼，头也很晕",
+        source: "text",
+      }),
+    });
+
+    assert.equal(chat.response.status, 200);
+    assert.equal(chat.data.intent, "symptom_guidance");
+    assert.ok(chat.data.symptom);
+    assert.match(chat.data.reply, /先坐下|躺下/);
+    assert.equal(chat.data.notification.attempted, false);
+
+    const logs = await ctx.request("/api/logs?type=symptom&limit=20");
+    assert.equal(logs.response.status, 200);
+    assert.ok(logs.data.logs.length >= 1);
+    assert.match(logs.data.logs[0].message, /照护症状/);
   } finally {
     await ctx.close();
   }

@@ -29,9 +29,10 @@ const {
   createId,
   decorateReminder,
   detectEmergency,
+  detectSymptomAlert,
   isValidDate,
   isValidTime,
-  parseReminderIntent,
+  parseReminderIntents,
   recentConversations,
   safeBoolean,
   safePhone,
@@ -815,20 +816,24 @@ async function handleApi(req, res, urlObj, options) {
 
     let responsePayload = null;
     let notificationPlan = null;
+    let notificationResult = null;
 
     await mutateStore(
       async (store) => {
         const emergency = detectEmergency(message);
+        const symptomAlert = emergency ? null : detectSymptomAlert(message);
         const scamRisk = emergency ? null : detectScamRisk(message);
-        const reminderIntent = emergency || scamRisk ? null : parseReminderIntent(message);
-        const liveAssistant = emergency || scamRisk || reminderIntent
+        const reminderIntents = emergency || symptomAlert || scamRisk ? [] : parseReminderIntents(message);
+        const reminderIntent = reminderIntents[0] || null;
+        const caregiver = buildCaregiverStatus(store);
+        const liveAssistant = emergency || symptomAlert || scamRisk || reminderIntent
           ? null
           : await buildLiveReply({
               message,
               profile: store.profile,
               reminders: sortedReminders(store.reminders),
             });
-        const bestKnowledgeMatch = emergency || scamRisk || reminderIntent ? null : findBestKnowledgeMatch(message);
+        const bestKnowledgeMatch = emergency || symptomAlert || scamRisk || reminderIntent ? null : findBestKnowledgeMatch(message);
         const knowledgeAssistant = knowledgeReply(bestKnowledgeMatch);
         const scamAssistant = scamRisk
           ? {
@@ -845,7 +850,11 @@ async function handleApi(req, res, urlObj, options) {
             message,
             profile: store.profile,
             reminderIntent,
+            reminderIntents,
             emergency,
+            symptomAlert,
+            canNotifyCaregiver: caregiver.webhookCount > 0,
+            caregiverName: caregiver.contact?.name || store.profile.emergencyContactName,
           });
         let assistant = fallbackAssistant;
         let replyProvider = scamAssistant
@@ -864,28 +873,31 @@ async function handleApi(req, res, urlObj, options) {
           createdAt: new Date().toISOString(),
         };
 
-        let createdReminder = null;
-        if (reminderIntent) {
-          createdReminder = {
+        const createdReminders = [];
+        reminderIntents.forEach((item) => {
+          const reminder = {
             id: createId("rem"),
-            title: reminderIntent.title,
-            time: reminderIntent.time,
-            repeat: reminderIntent.repeat,
-            scheduleDate: reminderIntent.scheduleDate,
+            title: item.title,
+            time: item.time,
+            repeat: item.repeat,
+            scheduleDate: item.scheduleDate,
             enabled: true,
             lastTriggeredAt: "",
             lastTriggeredDate: "",
             createdAt: new Date().toISOString(),
           };
-          store.reminders.unshift(createdReminder);
-          trimArray(store.reminders, 120);
-          addEvent(store, "reminder_created", `语音创建提醒：${createdReminder.title}`, {
-            reminderId: createdReminder.id,
+          createdReminders.push(reminder);
+          store.reminders.unshift(reminder);
+          addEvent(store, "reminder_created", `语音创建提醒：${reminder.title}`, {
+            reminderId: reminder.id,
             source,
-            time: createdReminder.time,
-            repeat: createdReminder.repeat,
-            scheduleDate: createdReminder.scheduleDate,
+            time: reminder.time,
+            repeat: reminder.repeat,
+            scheduleDate: reminder.scheduleDate,
           });
+        });
+        if (createdReminders.length) {
+          trimArray(store.reminders, 120);
         }
 
         if (emergency) {
@@ -908,6 +920,27 @@ async function handleApi(req, res, urlObj, options) {
               label: emergency.label,
               address: store.profile.address,
               contactPhone: store.profile.emergencyContactPhone,
+            },
+          };
+        } else if (symptomAlert) {
+          addEvent(
+            store,
+            symptomAlert.type,
+            `系统识别到照护症状：${message.slice(0, 60)}`,
+            {
+              source,
+              label: symptomAlert.label,
+              steps: symptomAlert.steps,
+            },
+            "normal"
+          );
+          notificationPlan = {
+            type: "symptom_guidance_alert",
+            title: `${store.profile.name || "老人"}出现需要留意的身体不适`,
+            message: `${message.slice(0, 80)}。系统已给出照护建议，请尽快电话确认目前状态。`,
+            meta: {
+              label: symptomAlert.label,
+              steps: symptomAlert.steps,
             },
           };
         } else if (scamRisk) {
@@ -991,7 +1024,16 @@ async function handleApi(req, res, urlObj, options) {
                 address: store.profile.address,
               }
             : null,
-          reminder: createdReminder ? decorateReminder(createdReminder) : null,
+          symptom: symptomAlert
+            ? {
+                label: symptomAlert.label,
+                steps: symptomAlert.steps,
+                contactName: store.profile.emergencyContactName,
+                contactPhone: store.profile.emergencyContactPhone,
+              }
+            : null,
+          reminder: createdReminders[0] ? decorateReminder(createdReminders[0]) : null,
+          reminders: createdReminders.map((item) => decorateReminder(item)),
           ai: aiCapabilities(),
           briefing: liveAssistant?.briefing || null,
           guard: scamRisk
@@ -1006,7 +1048,19 @@ async function handleApi(req, res, urlObj, options) {
     );
 
     if (notificationPlan) {
-      await sendCaregiverNotification(dataFile, notificationPlan);
+      notificationResult = await sendCaregiverNotification(dataFile, notificationPlan);
+    }
+    if (responsePayload) {
+      responsePayload.notification = notificationPlan
+        ? {
+            attempted: Boolean(notificationResult?.attempted),
+            delivered: Boolean(notificationResult?.delivered),
+            contactName:
+              responsePayload.emergency?.contactName ||
+              responsePayload.symptom?.contactName ||
+              "",
+          }
+        : null;
     }
 
     sendJson(res, 200, responsePayload);
@@ -1056,6 +1110,7 @@ async function handleApi(req, res, urlObj, options) {
       .filter((item) => {
         if (type === "conversation" && item.type !== "conversation") return false;
         if (type === "emergency" && !item.type.startsWith("emergency")) return false;
+        if (type === "symptom" && !item.type.startsWith("symptom")) return false;
         if (type === "reminder" && !item.type.startsWith("reminder")) return false;
         if (type === "safety" && !item.type.startsWith("safety")) return false;
         if (type === "checkin" && !item.type.startsWith("checkin")) return false;

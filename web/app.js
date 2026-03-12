@@ -746,6 +746,7 @@ function renderDashboard() {
 function logTypeLabel(log) {
   if (log.type === "conversation") return "对话";
   if (log.type.startsWith("emergency")) return "紧急";
+  if (log.type.startsWith("symptom")) return "照护";
   if (log.type.startsWith("safety_scam")) return "防诈骗";
   if (log.type.startsWith("reminder")) return "提醒";
   if (log.type.startsWith("checkin")) return "打卡";
@@ -1236,11 +1237,23 @@ async function submitChat(message, source = "text") {
     }
     void speak(data.reply || "", "reply");
 
-    if (data.reminder) {
+    if (Array.isArray(data.reminders) && data.reminders.length > 1) {
+      showToast(`已创建 ${data.reminders.length} 个提醒`);
+    } else if (data.reminder) {
       showToast("提醒已创建");
     }
     if (data.guard) {
       showToast("已触发防诈骗守护提醒");
+    }
+    if (data.symptom) {
+      showToast("已生成照护建议");
+    }
+    if (data.notification) {
+      if (data.notification.delivered) {
+        showToast("已通知联系人");
+      } else if (data.notification.contactName) {
+        showToast(`已记录情况，请尽快联系${data.notification.contactName}`);
+      }
     }
     if (data.emergency) {
       openEmergencyModal(data.emergency);
