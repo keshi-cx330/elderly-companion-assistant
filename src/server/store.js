@@ -11,7 +11,7 @@ const {
 } = require("./config");
 
 const defaultStore = {
-  version: 2,
+  version: 4,
   profile: {
     name: "王阿姨",
     age: "68",
@@ -39,6 +39,9 @@ const defaultStore = {
   reminders: [],
   conversations: [],
   events: [],
+  checkins: [],
+  familyNotes: [],
+  memoryNotes: [],
 };
 
 const writeQueues = new Map();
@@ -83,6 +86,37 @@ function normalizeEvent(item) {
   };
 }
 
+function normalizeCheckin(item) {
+  return {
+    id: String(item?.id || ""),
+    mood: String(item?.mood || "calm").slice(0, 20),
+    energy: String(item?.energy || "medium").slice(0, 20),
+    note: String(item?.note || "").slice(0, 140),
+    source: String(item?.source || "manual").slice(0, 20),
+    createdAt: String(item?.createdAt || ""),
+  };
+}
+
+function normalizeFamilyNote(item) {
+  return {
+    id: String(item?.id || ""),
+    author: String(item?.author || "").slice(0, 30),
+    message: String(item?.message || "").slice(0, 180),
+    pinned: Boolean(item?.pinned),
+    createdAt: String(item?.createdAt || ""),
+  };
+}
+
+function normalizeMemoryNote(item) {
+  return {
+    id: String(item?.id || ""),
+    prompt: String(item?.prompt || "").slice(0, 120),
+    content: String(item?.content || "").slice(0, 320),
+    source: String(item?.source || "manual").slice(0, 20),
+    createdAt: String(item?.createdAt || ""),
+  };
+}
+
 function normalizeStore(input = {}) {
   return {
     version: Number(input?.version) || defaultStore.version,
@@ -99,6 +133,9 @@ function normalizeStore(input = {}) {
       ? input.conversations.map(normalizeConversation)
       : [],
     events: Array.isArray(input?.events) ? input.events.map(normalizeEvent) : [],
+    checkins: Array.isArray(input?.checkins) ? input.checkins.map(normalizeCheckin) : [],
+    familyNotes: Array.isArray(input?.familyNotes) ? input.familyNotes.map(normalizeFamilyNote) : [],
+    memoryNotes: Array.isArray(input?.memoryNotes) ? input.memoryNotes.map(normalizeMemoryNote) : [],
   };
 }
 
@@ -278,9 +315,34 @@ async function ensureSqliteStore(dbFile = SQLITE_FILE) {
       "  meta TEXT NOT NULL DEFAULT '{}',",
       "  created_at TEXT NOT NULL DEFAULT ''",
       ");",
+      "CREATE TABLE IF NOT EXISTS checkins (",
+      "  id TEXT PRIMARY KEY,",
+      "  mood TEXT NOT NULL DEFAULT 'calm',",
+      "  energy TEXT NOT NULL DEFAULT 'medium',",
+      "  note TEXT NOT NULL DEFAULT '',",
+      "  source TEXT NOT NULL DEFAULT 'manual',",
+      "  created_at TEXT NOT NULL DEFAULT ''",
+      ");",
+      "CREATE TABLE IF NOT EXISTS family_notes (",
+      "  id TEXT PRIMARY KEY,",
+      "  author TEXT NOT NULL DEFAULT '',",
+      "  message TEXT NOT NULL DEFAULT '',",
+      "  pinned INTEGER NOT NULL DEFAULT 0,",
+      "  created_at TEXT NOT NULL DEFAULT ''",
+      ");",
+      "CREATE TABLE IF NOT EXISTS memory_notes (",
+      "  id TEXT PRIMARY KEY,",
+      "  prompt TEXT NOT NULL DEFAULT '',",
+      "  content TEXT NOT NULL DEFAULT '',",
+      "  source TEXT NOT NULL DEFAULT 'manual',",
+      "  created_at TEXT NOT NULL DEFAULT ''",
+      ");",
       "CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);",
       "CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON conversations(created_at DESC);",
       "CREATE INDEX IF NOT EXISTS idx_reminders_enabled ON reminders(enabled, time);",
+      "CREATE INDEX IF NOT EXISTS idx_checkins_created_at ON checkins(created_at DESC);",
+      "CREATE INDEX IF NOT EXISTS idx_family_notes_created_at ON family_notes(created_at DESC);",
+      "CREATE INDEX IF NOT EXISTS idx_memory_notes_created_at ON memory_notes(created_at DESC);",
     ].join("\n")
   );
 
@@ -304,7 +366,7 @@ async function ensureSqliteStore(dbFile = SQLITE_FILE) {
 async function readSqliteStore(dbFile = SQLITE_FILE) {
   await ensureSqliteStore(dbFile);
 
-  const [profileRows, settingsRows, reminderRows, conversationRows, eventRows] = await Promise.all([
+  const [profileRows, settingsRows, reminderRows, conversationRows, eventRows, checkinRows, familyNoteRows, memoryRows] = await Promise.all([
     sqliteJson(
       dbFile,
       [
@@ -385,10 +447,50 @@ async function readSqliteStore(dbFile = SQLITE_FILE) {
         "ORDER BY created_at DESC;",
       ].join("\n")
     ),
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  id,",
+        "  mood,",
+        "  energy,",
+        "  note,",
+        "  source,",
+        "  created_at AS createdAt",
+        "FROM checkins",
+        "ORDER BY created_at DESC;",
+      ].join("\n")
+    ),
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  id,",
+        "  author,",
+        "  message,",
+        "  pinned,",
+        "  created_at AS createdAt",
+        "FROM family_notes",
+        "ORDER BY pinned DESC, created_at DESC;",
+      ].join("\n")
+    ),
+    sqliteJson(
+      dbFile,
+      [
+        "SELECT",
+        "  id,",
+        "  prompt,",
+        "  content,",
+        "  source,",
+        "  created_at AS createdAt",
+        "FROM memory_notes",
+        "ORDER BY created_at DESC;",
+      ].join("\n")
+    ),
   ]);
 
   return normalizeStore({
-    version: 3,
+    version: 4,
     profile: profileRows[0] || {},
     settings: {
       ...(settingsRows[0] || {}),
@@ -413,6 +515,12 @@ async function readSqliteStore(dbFile = SQLITE_FILE) {
         }
       })(),
     })),
+    checkins: checkinRows,
+    familyNotes: familyNoteRows.map((item) => ({
+      ...item,
+      pinned: Boolean(Number(item.pinned)),
+    })),
+    memoryNotes: memoryRows,
   });
 }
 
@@ -474,6 +582,52 @@ async function persistSqliteStore(store, dbFile = SQLITE_FILE) {
       ].join("")
   );
 
+  const checkinStatements = normalized.checkins.map(
+    (item) =>
+      [
+        "INSERT INTO checkins (id, mood, energy, note, source, created_at) VALUES (",
+        [
+          sqlQuote(item.id),
+          sqlQuote(item.mood),
+          sqlQuote(item.energy),
+          sqlQuote(item.note),
+          sqlQuote(item.source),
+          sqlQuote(item.createdAt),
+        ].join(", "),
+        ");",
+      ].join("")
+  );
+
+  const familyNoteStatements = normalized.familyNotes.map(
+    (item) =>
+      [
+        "INSERT INTO family_notes (id, author, message, pinned, created_at) VALUES (",
+        [
+          sqlQuote(item.id),
+          sqlQuote(item.author),
+          sqlQuote(item.message),
+          sqlBool(item.pinned),
+          sqlQuote(item.createdAt),
+        ].join(", "),
+        ");",
+      ].join("")
+  );
+
+  const memoryStatements = normalized.memoryNotes.map(
+    (item) =>
+      [
+        "INSERT INTO memory_notes (id, prompt, content, source, created_at) VALUES (",
+        [
+          sqlQuote(item.id),
+          sqlQuote(item.prompt),
+          sqlQuote(item.content),
+          sqlQuote(item.source),
+          sqlQuote(item.createdAt),
+        ].join(", "),
+        ");",
+      ].join("")
+  );
+
   const sql = [
     "BEGIN IMMEDIATE;",
     "DELETE FROM profile;",
@@ -516,6 +670,12 @@ async function persistSqliteStore(store, dbFile = SQLITE_FILE) {
     ...conversationStatements,
     "DELETE FROM events;",
     ...eventStatements,
+    "DELETE FROM checkins;",
+    ...checkinStatements,
+    "DELETE FROM family_notes;",
+    ...familyNoteStatements,
+    "DELETE FROM memory_notes;",
+    ...memoryStatements,
     "COMMIT;",
   ].join("\n");
 

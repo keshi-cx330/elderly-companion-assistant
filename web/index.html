@@ -78,6 +78,56 @@
             </div>
           </div>
 
+          <div class="feature-grid">
+            <div class="section-card mood-card">
+              <div class="panel-head">
+                <h2>心情报个平安</h2>
+                <p id="checkin-summary">轻点一下，让家人知道您今天的状态。</p>
+              </div>
+              <div id="checkin-moods" class="mood-grid"></div>
+              <div class="two-col compact-grid">
+                <label>
+                  精神状态
+                  <select id="checkin-energy">
+                    <option value="high">精神足</option>
+                    <option value="medium" selected>还行</option>
+                    <option value="low">没劲</option>
+                  </select>
+                </label>
+                <label>
+                  想说一句
+                  <input id="checkin-note" type="text" maxlength="140" placeholder="例如：今天有点没胃口" />
+                </label>
+              </div>
+              <button id="save-checkin" type="button" class="primary-btn">保存今日状态</button>
+            </div>
+
+            <div class="section-card family-note-card">
+              <div class="panel-head">
+                <h2>家人的暖心便签</h2>
+                <p>家属可以远程写下一句问候，首页会优先展示。</p>
+              </div>
+              <div id="latest-family-note" class="family-note-display">还没有新的家人便签。</div>
+            </div>
+          </div>
+
+          <div class="section-card memory-card">
+            <div class="panel-head">
+              <h2>时光记忆卡</h2>
+              <p>这不是普通聊天，而是在帮老人留下可以被家人珍藏的故事。</p>
+            </div>
+            <div id="memory-prompt" class="memory-prompt">加载中</div>
+            <label>
+              说一段回忆
+              <textarea id="memory-input" rows="3" maxlength="320" placeholder="例如：我年轻时最爱吃外婆做的红烧肉……"></textarea>
+            </label>
+            <div class="composer-actions">
+              <button id="save-memory" type="button" class="primary-btn">保存这段回忆</button>
+              <button id="use-memory-prompt" type="button" class="ghost-btn">填入对话框继续聊</button>
+            </div>
+            <div id="memory-preview-list" class="stack-list"></div>
+          </div>
+
           <div id="chat-list" class="chat-list" aria-live="polite"></div>
 
           <div class="section-card composer-card">
@@ -291,6 +341,31 @@
 
           <div class="section-card">
             <div class="panel-head">
+              <h2>家人暖心便签</h2>
+              <p>给老人留下一句问候，首页会优先展示置顶便签。</p>
+            </div>
+            <form id="family-note-form" class="stack-form">
+              <div class="two-col">
+                <label>
+                  留言人
+                  <input id="family-note-author" type="text" maxlength="30" placeholder="例如：女儿" />
+                </label>
+                <label class="switch-row">
+                  <span>置顶到首页</span>
+                  <input id="family-note-pinned" type="checkbox" />
+                </label>
+              </div>
+              <label>
+                留言内容
+                <textarea id="family-note-message" rows="3" maxlength="180" placeholder="例如：妈，今天降温了，出门记得多穿一件。"></textarea>
+              </label>
+              <button type="submit" class="primary-btn">发送暖心便签</button>
+            </form>
+            <div id="family-note-list" class="stack-list"></div>
+          </div>
+
+          <div class="section-card">
+            <div class="panel-head">
               <h2>家属查看</h2>
               <p>对话、提醒和紧急事件都可以追溯</p>
             </div>
@@ -320,6 +395,36 @@
                 <p class="summary-key">最近高风险事件</p>
                 <p id="sum-last-emergency" class="summary-text">-</p>
               </article>
+              <article>
+                <p class="summary-key">7天防诈骗提醒</p>
+                <p id="sum-scam" class="summary-value danger">-</p>
+              </article>
+              <article>
+                <p class="summary-key">时光回忆数</p>
+                <p id="sum-memory" class="summary-value">-</p>
+              </article>
+              <article>
+                <p class="summary-key">最近状态</p>
+                <p id="sum-checkin" class="summary-text">-</p>
+              </article>
+            </div>
+          </div>
+
+          <div class="two-panel">
+            <div class="section-card">
+              <div class="panel-head">
+                <h2>最近状态打卡</h2>
+                <p>适合家属快速判断老人今天状态。</p>
+              </div>
+              <div id="checkin-list" class="stack-list"></div>
+            </div>
+
+            <div class="section-card">
+              <div class="panel-head">
+                <h2>时光回忆册</h2>
+                <p>把老人说过的故事沉淀下来，形成真正有情感价值的内容。</p>
+              </div>
+              <div id="memory-list" class="stack-list"></div>
             </div>
           </div>
 
@@ -335,6 +440,10 @@
               <option value="conversation">对话</option>
               <option value="reminder">提醒</option>
               <option value="emergency">紧急</option>
+              <option value="safety">防诈骗</option>
+              <option value="checkin">打卡</option>
+              <option value="memory">回忆</option>
+              <option value="family">便签</option>
               <option value="profile">资料设置</option>
             </select>
             <select id="log-level">

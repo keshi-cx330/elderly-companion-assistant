@@ -5,6 +5,14 @@ const { URL } = require("url");
 const { aiCapabilities, createDeepSeekReply, isDeepSeekEnabled } = require("./ai");
 const { buildLiveReply, getDailyBriefing } = require("./briefing");
 const { APP_NAME, APP_VERSION, DEFAULT_DATA_FILE, MAX_BODY_SIZE, WEB_DIR } = require("./config");
+const {
+  buildEngagementSnapshot,
+  detectScamRisk,
+  energyInfo,
+  moodInfo,
+  normalizeEnergy,
+  normalizeMood,
+} = require("./engagement");
 const { findBestKnowledgeMatch, getAssistantExperience, knowledgeReply } = require("./knowledge");
 const {
   buildCaregiverDigest,
@@ -139,6 +147,7 @@ function buildBootstrapPayload(store, now = new Date()) {
   return {
     ai: aiCapabilities(),
     experience: getAssistantExperience(),
+    engagement: buildEngagementSnapshot(store, now),
     caregiver: buildCaregiverStatus(store),
     profile: store.profile,
     settings: store.settings,
@@ -314,6 +323,174 @@ async function handleApi(req, res, urlObj, options) {
       experience: getAssistantExperience(),
       ai: aiCapabilities(),
     });
+    return true;
+  }
+
+  if (method === "GET" && pathname === "/api/engagement") {
+    const store = await readStore(dataFile);
+    sendJson(res, 200, {
+      engagement: buildEngagementSnapshot(store),
+      dashboard: buildDashboard(store).summary,
+    });
+    return true;
+  }
+
+  if (method === "GET" && pathname === "/api/checkins") {
+    const store = await readStore(dataFile);
+    const limitRaw = Number(urlObj.searchParams.get("limit") || 20);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
+    sendJson(res, 200, {
+      checkins: (store.checkins || []).slice(0, limit).map((item) => ({
+        ...item,
+        moodLabel: moodInfo(item.mood).label,
+        energyLabel: energyInfo(item.energy).label,
+      })),
+    });
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/checkins") {
+    const body = await parseBody(req);
+    const mood = normalizeMood(body.mood);
+    const energy = normalizeEnergy(body.energy);
+    const note = safeText(body.note, 140);
+    const source = body.source === "voice" ? "voice" : "manual";
+    const checkin = {
+      id: createId("ck"),
+      mood,
+      energy,
+      note,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+
+    await mutateStore(
+      async (store) => {
+        store.checkins.unshift(checkin);
+        trimArray(store.checkins, 120);
+        addEvent(store, "checkin_recorded", `状态打卡：${moodInfo(mood).label} / ${energyInfo(energy).label}`, {
+          mood,
+          energy,
+          note,
+          source,
+        });
+      },
+      dataFile
+    );
+
+    if (["unwell", "anxious"].includes(mood)) {
+      await sendCaregiverNotification(dataFile, {
+        type: "wellbeing_checkin_alert",
+        title: "老人状态打卡提示",
+        message: `${moodInfo(mood).label}，精神状态：${energyInfo(energy).label}。${note ? `备注：${note}` : "建议尽快电话关心一下。"}`,
+        meta: {
+          mood,
+          energy,
+          note,
+        },
+      });
+    }
+
+    sendJson(res, 201, {
+      checkin: {
+        ...checkin,
+        moodLabel: moodInfo(mood).label,
+        energyLabel: energyInfo(energy).label,
+      },
+    });
+    return true;
+  }
+
+  if (method === "GET" && pathname === "/api/memories") {
+    const store = await readStore(dataFile);
+    const limitRaw = Number(urlObj.searchParams.get("limit") || 20);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
+    sendJson(res, 200, {
+      memoryPrompt: buildEngagementSnapshot(store).memoryPrompt,
+      memories: (store.memoryNotes || []).slice(0, limit),
+    });
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/memories") {
+    const body = await parseBody(req);
+    const prompt = safeText(body.prompt, 120);
+    const content = safeText(body.content, 320);
+    const source = body.source === "voice" ? "voice" : "manual";
+    if (!content) {
+      sendError(res, 400, "回忆内容不能为空");
+      return true;
+    }
+
+    const memory = {
+      id: createId("mem"),
+      prompt,
+      content,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+
+    await mutateStore(
+      async (store) => {
+        store.memoryNotes.unshift(memory);
+        trimArray(store.memoryNotes, 120);
+        addEvent(store, "memory_saved", "保存了一条时光回忆", {
+          prompt,
+          source,
+        });
+      },
+      dataFile
+    );
+
+    sendJson(res, 201, { memory });
+    return true;
+  }
+
+  if (method === "GET" && pathname === "/api/family-notes") {
+    const store = await readStore(dataFile);
+    const limitRaw = Number(urlObj.searchParams.get("limit") || 20);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
+    sendJson(res, 200, {
+      familyNotes: (store.familyNotes || []).slice(0, limit),
+    });
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/family-notes") {
+    const body = await parseBody(req);
+    const author = safeText(body.author, 30) || "家人";
+    const message = safeText(body.message, 180);
+    const pinned = safeBoolean(body.pinned, false);
+    if (!message) {
+      sendError(res, 400, "暖心便签内容不能为空");
+      return true;
+    }
+
+    const note = {
+      id: createId("note"),
+      author,
+      message,
+      pinned,
+      createdAt: new Date().toISOString(),
+    };
+
+    await mutateStore(
+      async (store) => {
+        if (pinned) {
+          store.familyNotes.forEach((item) => {
+            item.pinned = false;
+          });
+        }
+        store.familyNotes.unshift(note);
+        trimArray(store.familyNotes, 60);
+        addEvent(store, "family_note_added", `新增家人便签：${author}`, {
+          pinned,
+        });
+      },
+      dataFile
+    );
+
+    sendJson(res, 201, { familyNote: note });
     return true;
   }
 
@@ -642,17 +819,26 @@ async function handleApi(req, res, urlObj, options) {
     await mutateStore(
       async (store) => {
         const emergency = detectEmergency(message);
-        const reminderIntent = emergency ? null : parseReminderIntent(message);
-        const liveAssistant = emergency || reminderIntent
+        const scamRisk = emergency ? null : detectScamRisk(message);
+        const reminderIntent = emergency || scamRisk ? null : parseReminderIntent(message);
+        const liveAssistant = emergency || scamRisk || reminderIntent
           ? null
           : await buildLiveReply({
               message,
               profile: store.profile,
               reminders: sortedReminders(store.reminders),
             });
-        const bestKnowledgeMatch = emergency || reminderIntent ? null : findBestKnowledgeMatch(message);
+        const bestKnowledgeMatch = emergency || scamRisk || reminderIntent ? null : findBestKnowledgeMatch(message);
         const knowledgeAssistant = knowledgeReply(bestKnowledgeMatch);
+        const scamAssistant = scamRisk
+          ? {
+              reply: scamRisk.reply,
+              suggestions: scamRisk.suggestions,
+              intent: "scam_guard",
+            }
+          : null;
         const fallbackAssistant =
+          scamAssistant ||
           liveAssistant ||
           knowledgeAssistant ||
           buildAssistantResponse({
@@ -662,7 +848,9 @@ async function handleApi(req, res, urlObj, options) {
             emergency,
           });
         let assistant = fallbackAssistant;
-        let replyProvider = liveAssistant
+        let replyProvider = scamAssistant
+          ? "local-anti-scam"
+          : liveAssistant
           ? liveAssistant.provider
           : knowledgeAssistant
             ? "local-knowledge"
@@ -720,6 +908,26 @@ async function handleApi(req, res, urlObj, options) {
               label: emergency.label,
               address: store.profile.address,
               contactPhone: store.profile.emergencyContactPhone,
+            },
+          };
+        } else if (scamRisk) {
+          addEvent(
+            store,
+            scamRisk.type,
+            `系统识别到疑似诈骗表达：${message.slice(0, 60)}`,
+            {
+              source,
+              label: scamRisk.label,
+              steps: scamRisk.steps,
+            },
+            "high"
+          );
+          notificationPlan = {
+            type: "anti_scam_alert",
+            title: `${store.profile.name || "老人"}疑似遇到诈骗风险`,
+            message: `${message.slice(0, 80)}。建议尽快电话核实，提醒其不要转账或透露验证码。`,
+            meta: {
+              label: scamRisk.label,
             },
           };
         } else if (!reminderIntent && !knowledgeAssistant && !liveAssistant && isDeepSeekEnabled()) {
@@ -786,6 +994,12 @@ async function handleApi(req, res, urlObj, options) {
           reminder: createdReminder ? decorateReminder(createdReminder) : null,
           ai: aiCapabilities(),
           briefing: liveAssistant?.briefing || null,
+          guard: scamRisk
+            ? {
+                label: scamRisk.label,
+                steps: scamRisk.steps,
+              }
+            : null,
         };
       },
       dataFile
@@ -843,6 +1057,10 @@ async function handleApi(req, res, urlObj, options) {
         if (type === "conversation" && item.type !== "conversation") return false;
         if (type === "emergency" && !item.type.startsWith("emergency")) return false;
         if (type === "reminder" && !item.type.startsWith("reminder")) return false;
+        if (type === "safety" && !item.type.startsWith("safety")) return false;
+        if (type === "checkin" && !item.type.startsWith("checkin")) return false;
+        if (type === "memory" && !item.type.startsWith("memory")) return false;
+        if (type === "family" && !item.type.startsWith("family_note")) return false;
         if (type === "profile" && !item.type.startsWith("profile") && !item.type.startsWith("settings")) return false;
         if (level !== "all" && item.level !== level) return false;
         if (q && !item.message.includes(q)) return false;

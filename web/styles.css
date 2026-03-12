@@ -388,6 +388,13 @@ label {
     radial-gradient(circle at top right, rgba(255, 183, 97, 0.1), transparent 32%);
 }
 
+.feature-grid,
+.two-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .composer-card {
   display: grid;
   gap: 14px;
@@ -410,6 +417,13 @@ label {
 
 .sub-head {
   padding-top: 4px;
+}
+
+.mood-card,
+.family-note-card,
+.memory-card {
+  display: grid;
+  gap: 14px;
 }
 
 .quick-actions {
@@ -631,6 +645,69 @@ a:focus-visible {
 .news-item span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.mood-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mood-pill {
+  min-height: 48px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(123, 213, 255, 0.16);
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(13, 32, 47, 0.92), rgba(9, 22, 33, 0.9));
+}
+
+.mood-pill.active {
+  color: #03111a;
+  border-color: transparent;
+  background: linear-gradient(135deg, #6ff0c0, #53d8ff 55%, #61b5ff 100%);
+  box-shadow: 0 12px 24px rgba(83, 216, 255, 0.18);
+}
+
+.compact-grid label {
+  align-content: start;
+}
+
+.family-note-display,
+.memory-prompt,
+.list-card {
+  padding: 14px 15px;
+  border-radius: 20px;
+  border: 1px solid rgba(124, 214, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(13, 31, 46, 0.92), rgba(8, 21, 32, 0.9)),
+    linear-gradient(90deg, rgba(104, 255, 207, 0.04), transparent);
+}
+
+.family-note-display,
+.memory-prompt {
+  line-height: 1.7;
+}
+
+.memory-prompt {
+  border-color: rgba(255, 183, 97, 0.16);
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, 0.94), rgba(8, 21, 32, 0.92)),
+    radial-gradient(circle at top right, rgba(255, 183, 97, 0.12), transparent 34%);
+}
+
+.list-card {
+  display: grid;
+  gap: 6px;
+}
+
+.list-card strong {
+  line-height: 1.55;
+}
+
+.list-card span {
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .danger-outline {
@@ -932,6 +1009,8 @@ a:focus-visible {
   .summary-grid,
   .inline-tools,
   .hero-grid,
+  .feature-grid,
+  .two-panel,
   .briefing-grid,
   .emergency-actions {
     display: grid;

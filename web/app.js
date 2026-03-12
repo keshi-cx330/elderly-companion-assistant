@@ -29,6 +29,23 @@ const state = {
     digestHour: "08:30",
     lastDigestDate: "",
   },
+  engagement: {
+    memoryPrompt: {
+      prompt: "今天还没有新的时光话题。",
+    },
+    checkinOptions: [],
+    energyOptions: [],
+    latestCheckin: null,
+    latestFamilyNote: null,
+    recentMemories: [],
+    recentCheckins: [],
+    recentFamilyNotes: [],
+    wellbeingSummary: {
+      latestLabel: "今天还没有报平安",
+      lowMoodCount7d: 0,
+      memoryCount: 0,
+    },
+  },
   ai: {
     chatConfigured: false,
     chatProviderLabel: "本地规则回复",
@@ -48,6 +65,7 @@ const state = {
     "今天有什么好玩的新闻或笑话吗？",
   ],
   activeEmergency: null,
+  pendingCheckinMood: "calm",
 };
 
 const refs = {
@@ -99,18 +117,39 @@ const refs = {
   briefingNews: document.querySelector("#briefing-news"),
   briefingPlay: document.querySelector("#briefing-play"),
   briefingRefresh: document.querySelector("#briefing-refresh"),
+  checkinSummary: document.querySelector("#checkin-summary"),
+  checkinMoods: document.querySelector("#checkin-moods"),
+  checkinEnergy: document.querySelector("#checkin-energy"),
+  checkinNote: document.querySelector("#checkin-note"),
+  saveCheckin: document.querySelector("#save-checkin"),
+  latestFamilyNote: document.querySelector("#latest-family-note"),
+  memoryPrompt: document.querySelector("#memory-prompt"),
+  memoryInput: document.querySelector("#memory-input"),
+  saveMemory: document.querySelector("#save-memory"),
+  useMemoryPrompt: document.querySelector("#use-memory-prompt"),
+  memoryPreviewList: document.querySelector("#memory-preview-list"),
   caregiverStatus: document.querySelector("#caregiver-status"),
   caregiverDigestTime: document.querySelector("#caregiver-digest-time"),
   caregiverWebhookCount: document.querySelector("#caregiver-webhook-count"),
   caregiverContact: document.querySelector("#caregiver-contact"),
   sendDigest: document.querySelector("#send-digest"),
   testCaregiverNotify: document.querySelector("#test-caregiver-notify"),
+  familyNoteForm: document.querySelector("#family-note-form"),
+  familyNoteAuthor: document.querySelector("#family-note-author"),
+  familyNotePinned: document.querySelector("#family-note-pinned"),
+  familyNoteMessage: document.querySelector("#family-note-message"),
+  familyNoteList: document.querySelector("#family-note-list"),
   sumChat: document.querySelector("#sum-chat"),
   sumEmergency: document.querySelector("#sum-emergency"),
   sumReminder: document.querySelector("#sum-reminder"),
   sumEnabled: document.querySelector("#sum-enabled"),
   sumNext: document.querySelector("#sum-next"),
   sumLastEmergency: document.querySelector("#sum-last-emergency"),
+  sumScam: document.querySelector("#sum-scam"),
+  sumMemory: document.querySelector("#sum-memory"),
+  sumCheckin: document.querySelector("#sum-checkin"),
+  checkinList: document.querySelector("#checkin-list"),
+  memoryList: document.querySelector("#memory-list"),
   familyAlert: document.querySelector("#family-alert"),
   logType: document.querySelector("#log-type"),
   logLevel: document.querySelector("#log-level"),
@@ -375,6 +414,126 @@ function renderCaregiverStatus() {
   refs.caregiverContact.textContent = contactParts.length ? contactParts.join(" · ") : "未设置";
 }
 
+function simpleCard(title, subtitle) {
+  const article = document.createElement("article");
+  article.className = "list-card";
+  article.appendChild(createTextNode("strong", title || "-"));
+  article.appendChild(createTextNode("span", subtitle || ""));
+  return article;
+}
+
+function renderCheckinButtons() {
+  refs.checkinMoods.innerHTML = "";
+  const options = state.engagement.checkinOptions?.length
+    ? state.engagement.checkinOptions
+    : [
+        { id: "happy", label: "心情不错" },
+        { id: "calm", label: "挺平稳" },
+        { id: "lonely", label: "有点闷" },
+        { id: "unwell", label: "不太舒服" },
+      ];
+
+  options.forEach((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mood-pill";
+    button.textContent = item.label;
+    button.classList.toggle("active", state.pendingCheckinMood === item.id);
+    button.addEventListener("click", () => {
+      state.pendingCheckinMood = item.id;
+      renderCheckinButtons();
+    });
+    refs.checkinMoods.appendChild(button);
+  });
+}
+
+function renderEnergyOptions() {
+  const options = state.engagement.energyOptions?.length
+    ? state.engagement.energyOptions
+    : [
+        { id: "high", label: "精神足" },
+        { id: "medium", label: "还行" },
+        { id: "low", label: "没劲" },
+      ];
+
+  const previousValue = refs.checkinEnergy.value || "medium";
+  refs.checkinEnergy.innerHTML = "";
+  options.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    if (item.id === previousValue) {
+      option.selected = true;
+    }
+    refs.checkinEnergy.appendChild(option);
+  });
+
+  if (![...refs.checkinEnergy.options].some((item) => item.value === previousValue)) {
+    refs.checkinEnergy.value = options[0]?.id || "medium";
+  }
+}
+
+function renderEngagement() {
+  const engagement = state.engagement || {};
+  const latestCheckin = engagement.latestCheckin;
+  refs.checkinSummary.textContent = latestCheckin
+    ? `最近一次：${latestCheckin.moodLabel} · ${latestCheckin.energyLabel}${latestCheckin.note ? `，${latestCheckin.note}` : ""}`
+    : "轻点一下，让家人知道您今天的状态。";
+  refs.latestFamilyNote.textContent = engagement.latestFamilyNote
+    ? `${engagement.latestFamilyNote.author}：${engagement.latestFamilyNote.message}`
+    : "还没有新的家人便签。";
+  refs.memoryPrompt.textContent = engagement.memoryPrompt?.prompt || "今天还没有新的时光话题。";
+  refs.sumCheckin.textContent = engagement.wellbeingSummary?.latestLabel || "今天还没有报平安";
+  renderCheckinButtons();
+  renderEnergyOptions();
+
+  refs.memoryPreviewList.innerHTML = "";
+  const previewMemories = Array.isArray(engagement.recentMemories) ? engagement.recentMemories.slice(0, 3) : [];
+  if (!previewMemories.length) {
+    refs.memoryPreviewList.appendChild(simpleCard("还没有保存回忆", "今天说一段故事，家属页就能看到。"));
+  } else {
+    previewMemories.forEach((item) => {
+      refs.memoryPreviewList.appendChild(simpleCard(item.content, item.prompt || formatDateTime(item.createdAt)));
+    });
+  }
+
+  refs.familyNoteList.innerHTML = "";
+  const noteItems = Array.isArray(engagement.recentFamilyNotes) ? engagement.recentFamilyNotes.slice(0, 4) : [];
+  if (!noteItems.length) {
+    refs.familyNoteList.appendChild(simpleCard("还没有家人便签", "可以在上方表单给老人留下一句问候。"));
+  } else {
+    noteItems.forEach((item) => {
+      refs.familyNoteList.appendChild(simpleCard(`${item.author}${item.pinned ? " · 置顶" : ""}`, item.message));
+    });
+  }
+
+  refs.checkinList.innerHTML = "";
+  const checkinItems = Array.isArray(engagement.recentCheckins) ? engagement.recentCheckins : [];
+  if (!checkinItems.length) {
+    refs.checkinList.appendChild(simpleCard("今天还没有状态打卡", "老人点一下首页的心情按钮，这里就会更新。"));
+  } else {
+    checkinItems.forEach((item) => {
+      refs.checkinList.appendChild(
+        simpleCard(`${item.moodLabel} · ${item.energyLabel}`, item.note || formatDateTime(item.createdAt))
+      );
+    });
+  }
+
+  refs.memoryList.innerHTML = "";
+  const memoryItems = Array.isArray(engagement.recentMemories) ? engagement.recentMemories : [];
+  if (!memoryItems.length) {
+    refs.memoryList.appendChild(simpleCard("今天还没有新的故事", "首页的时光记忆卡保存后，这里就会出现。"));
+  } else {
+    memoryItems.forEach((item) => {
+      refs.memoryList.appendChild(simpleCard(item.prompt || "时光回忆", item.content));
+    });
+  }
+
+  if (!refs.familyNoteAuthor.value) {
+    refs.familyNoteAuthor.value = state.profile.caregiverRelation || state.profile.caregiverName || "";
+  }
+}
+
 function renderQuickActions(actions = state.quickActions) {
   refs.quickActions.innerHTML = "";
   actions.forEach((item) => {
@@ -548,6 +707,8 @@ function renderDashboard() {
   refs.sumEmergency.textContent = String(state.dashboard.emergencyCount7d ?? 0);
   refs.sumReminder.textContent = String(state.dashboard.reminderEventCount7d ?? 0);
   refs.sumEnabled.textContent = String(state.dashboard.reminderEnabled ?? 0);
+  refs.sumScam.textContent = String(state.dashboard.scamAlertCount7d ?? 0);
+  refs.sumMemory.textContent = String(state.dashboard.memoryCount ?? 0);
   refs.sumNext.textContent = state.dashboard.nextReminderLabel || "暂无已启用提醒";
   refs.sumLastEmergency.textContent = state.dashboard.lastEmergencyAt
     ? formatDateTime(state.dashboard.lastEmergencyAt)
@@ -557,14 +718,27 @@ function renderDashboard() {
   refs.familyAlert.innerHTML = "";
   refs.familyAlert.appendChild(createTextNode("p", "照护提示", "alert-kicker"));
   refs.familyAlert.appendChild(
-    createTextNode("h3", hasEmergency ? "最近出现过高风险表达" : "暂无高风险告警")
+    createTextNode(
+      "h3",
+      hasEmergency
+        ? "最近出现过高风险表达"
+        : state.dashboard.scamAlertCount7d
+          ? "最近出现过防诈骗提醒"
+          : state.engagement.wellbeingSummary?.lowMoodCount7d
+            ? "最近需要更多情绪陪伴"
+            : "暂无高风险告警"
+    )
   );
   refs.familyAlert.appendChild(
     createTextNode(
       "p",
       hasEmergency
         ? `${state.dashboard.lastEmergencyLabel || "系统已记录紧急事件"}，发生时间：${formatDateTime(state.dashboard.lastEmergencyAt)}`
-        : "如果检测到胸痛、摔倒、救命等表达，这里会优先显示。"
+        : state.dashboard.scamAlertCount7d
+          ? `近 7 天出现 ${state.dashboard.scamAlertCount7d} 次防诈骗提醒，建议主动电话核实老人最近接触的陌生来电或转账请求。`
+          : state.engagement.wellbeingSummary?.lowMoodCount7d
+            ? `近 7 天有 ${state.engagement.wellbeingSummary.lowMoodCount7d} 次低落或不安状态打卡，建议多通话、多留言。`
+            : "如果检测到胸痛、摔倒、救命等表达，这里会优先显示。"
     )
   );
 }
@@ -572,7 +746,11 @@ function renderDashboard() {
 function logTypeLabel(log) {
   if (log.type === "conversation") return "对话";
   if (log.type.startsWith("emergency")) return "紧急";
+  if (log.type.startsWith("safety_scam")) return "防诈骗";
   if (log.type.startsWith("reminder")) return "提醒";
+  if (log.type.startsWith("checkin")) return "打卡";
+  if (log.type.startsWith("memory")) return "回忆";
+  if (log.type.startsWith("family_note")) return "便签";
   return "资料";
 }
 
@@ -927,6 +1105,10 @@ async function refreshOverview() {
     ...state.caregiver,
     ...(data.caregiver || {}),
   };
+  state.engagement = {
+    ...state.engagement,
+    ...(data.engagement || {}),
+  };
   state.reminders = data.reminders || [];
   state.conversations = data.conversations || [];
   state.dashboard = data.dashboard || {};
@@ -941,6 +1123,7 @@ async function refreshOverview() {
   renderReminders();
   renderDashboard();
   renderCaregiverStatus();
+  renderEngagement();
   renderLogs();
   updateVoiceUi();
 }
@@ -957,6 +1140,59 @@ async function loadBriefing() {
   };
   renderBriefing();
   renderCaregiverStatus();
+}
+
+async function saveCheckin() {
+  const data = await api("/api/checkins", {
+    method: "POST",
+    body: JSON.stringify({
+      mood: state.pendingCheckinMood,
+      energy: refs.checkinEnergy.value,
+      note: refs.checkinNote.value,
+      source: "manual",
+    }),
+  });
+  refs.checkinNote.value = "";
+  await refreshOverview();
+  showToast(`已记录：${data.checkin.moodLabel}`);
+}
+
+async function saveMemoryNote() {
+  const content = refs.memoryInput.value.trim();
+  if (!content) {
+    showToast("先说一段回忆再保存");
+    return;
+  }
+  await api("/api/memories", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: state.engagement.memoryPrompt?.prompt || "",
+      content,
+      source: "manual",
+    }),
+  });
+  refs.memoryInput.value = "";
+  await refreshOverview();
+  showToast("这段回忆已经保存");
+}
+
+async function saveFamilyNote() {
+  if (!refs.familyNoteMessage.value.trim()) {
+    showToast("先写一句想对老人说的话");
+    return;
+  }
+  await api("/api/family-notes", {
+    method: "POST",
+    body: JSON.stringify({
+      author: refs.familyNoteAuthor.value,
+      message: refs.familyNoteMessage.value,
+      pinned: refs.familyNotePinned.checked,
+    }),
+  });
+  refs.familyNoteMessage.value = "";
+  refs.familyNotePinned.checked = false;
+  await refreshOverview();
+  showToast("暖心便签已发送");
 }
 
 async function loadLogs() {
@@ -1002,6 +1238,9 @@ async function submitChat(message, source = "text") {
 
     if (data.reminder) {
       showToast("提醒已创建");
+    }
+    if (data.guard) {
+      showToast("已触发防诈骗守护提醒");
     }
     if (data.emergency) {
       openEmergencyModal(data.emergency);
@@ -1198,6 +1437,24 @@ function bindForms() {
     } catch (error) {
       showToast(error.message);
     }
+  });
+
+  refs.saveCheckin.addEventListener("click", () => {
+    void saveCheckin().catch((error) => showToast(error.message));
+  });
+
+  refs.saveMemory.addEventListener("click", () => {
+    void saveMemoryNote().catch((error) => showToast(error.message));
+  });
+
+  refs.useMemoryPrompt.addEventListener("click", () => {
+    refs.chatInput.value = state.engagement.memoryPrompt?.prompt || "";
+    refs.chatInput.focus();
+  });
+
+  refs.familyNoteForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveFamilyNote().catch((error) => showToast(error.message));
   });
 }
 

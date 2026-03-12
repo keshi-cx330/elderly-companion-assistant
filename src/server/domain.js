@@ -233,14 +233,25 @@ function buildDashboard(store, now = new Date()) {
   const decoratedReminders = sortReminders(store.reminders.map((item) => decorateReminder(item, now)));
   const nextReminder = decoratedReminders.find((item) => item.nextDueAt) || null;
   const lastEmergency = store.events.find((item) => item.type.startsWith("emergency")) || null;
+  const latestCheckin = Array.isArray(store.checkins) && store.checkins.length ? store.checkins[0] : null;
 
   return {
     summary: {
       chatCount: store.conversations.filter((item) => item.role === "user").length,
       emergencyCount7d: recentEvents.filter((item) => item.type.startsWith("emergency")).length,
+      scamAlertCount7d: recentEvents.filter((item) => item.type.startsWith("safety_scam")).length,
       reminderEventCount7d: recentEvents.filter((item) => item.type.startsWith("reminder")).length,
       reminderEnabled: store.reminders.filter((item) => item.enabled).length,
       activeReminderCount: store.reminders.filter((item) => item.enabled).length,
+      memoryCount: Array.isArray(store.memoryNotes) ? store.memoryNotes.length : 0,
+      lowMoodCount7d: Array.isArray(store.checkins)
+        ? store.checkins.filter((item) => {
+            const createdAt = new Date(item.createdAt).getTime();
+            if (!Number.isFinite(createdAt) || nowMs - createdAt > sevenDaysMs) return false;
+            return ["lonely", "anxious", "unwell"].includes(String(item.mood || ""));
+          }).length
+        : 0,
+      latestCheckinMood: latestCheckin?.mood || "",
       nextReminderLabel: nextReminder ? nextReminder.label : "暂无已启用提醒",
       nextReminderAt: nextReminder?.nextDueAt || "",
       lastEmergencyAt: lastEmergency?.createdAt || "",

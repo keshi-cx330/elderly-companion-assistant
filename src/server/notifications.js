@@ -1,5 +1,6 @@
 const { NOTIFY_TIMEOUT_MS, NOTIFY_WEBHOOK_URLS } = require("./config");
 const { safeText } = require("./domain");
+const { energyInfo, moodInfo } = require("./engagement");
 
 function caregiverWebhookTargets(store = {}) {
   const storeWebhook = safeText(store?.profile?.caregiverWebhookUrl || "", 300);
@@ -104,15 +105,29 @@ function buildCaregiverDigest(store = {}, now = new Date()) {
     .filter((event) => event.level === "high")
     .slice(0, 3)
     .map((event) => event.message);
+  const scamAlerts7d = (store.events || []).filter((event) => {
+    if (!String(event.type || "").startsWith("safety_scam")) return false;
+    const createdAt = new Date(event.createdAt).getTime();
+    return Number.isFinite(createdAt) && now.getTime() - createdAt <= 7 * 24 * 60 * 60 * 1000;
+  }).length;
   const enabledReminders = (store.reminders || []).filter((item) => item.enabled);
   const nextReminder = enabledReminders[0] || null;
+  const latestCheckin = Array.isArray(store.checkins) && store.checkins.length ? store.checkins[0] : null;
+  const latestMemory = Array.isArray(store.memoryNotes) && store.memoryNotes.length ? store.memoryNotes[0] : null;
   const title = `${safeText(store?.profile?.name || "老人", 30)}今日安心摘要`;
   const lines = [
     `今日时间：${now.toISOString().slice(0, 10)}`,
     nextReminder
       ? `下一条提醒：${nextReminder.repeat === "daily" ? "每天" : nextReminder.scheduleDate || "今天"} ${nextReminder.time} · ${nextReminder.title}`
       : "下一条提醒：今天暂无待办提醒",
+    latestCheckin
+      ? `最近状态打卡：${moodInfo(latestCheckin.mood).label} / ${energyInfo(latestCheckin.energy).label}${latestCheckin.note ? `，备注：${latestCheckin.note}` : ""}`
+      : "最近状态打卡：今天还没有新的报平安记录",
+    latestMemory
+      ? `最新时光回忆：${safeText(latestMemory.content || "", 60)}`
+      : "最新时光回忆：今天还没有新的回忆记录",
     `近 7 天高风险事件：${recentHighEvents.length} 次`,
+    `近 7 天防诈骗提醒：${scamAlerts7d} 次`,
     recentHighEvents.length ? `最近一次：${recentHighEvents[0]}` : "最近没有新的高风险事件",
   ];
 
@@ -122,6 +137,9 @@ function buildCaregiverDigest(store = {}, now = new Date()) {
     meta: {
       highRiskCount: recentHighEvents.length,
       reminderEnabledCount: enabledReminders.length,
+      scamAlerts7d,
+      latestCheckinAt: latestCheckin?.createdAt || "",
+      latestMemoryAt: latestMemory?.createdAt || "",
     },
   };
 }

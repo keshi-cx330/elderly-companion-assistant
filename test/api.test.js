@@ -222,3 +222,86 @@ test("briefing and caregiver endpoints should return fallback-friendly data", as
     await ctx.close();
   }
 });
+
+test("engagement endpoints should persist checkins memories and family notes", async () => {
+  const ctx = await startServer();
+  try {
+    const checkin = await ctx.request("/api/checkins", {
+      method: "POST",
+      body: JSON.stringify({
+        mood: "lonely",
+        energy: "low",
+        note: "今天有点闷",
+      }),
+    });
+    assert.equal(checkin.response.status, 201);
+    assert.equal(checkin.data.checkin.moodLabel, "有点闷");
+
+    const memory = await ctx.request("/api/memories", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: "小时候最爱吃什么？",
+        content: "我小时候最爱吃外婆做的红烧肉。",
+      }),
+    });
+    assert.equal(memory.response.status, 201);
+    assert.match(memory.data.memory.content, /红烧肉/);
+
+    const note = await ctx.request("/api/family-notes", {
+      method: "POST",
+      body: JSON.stringify({
+        author: "女儿",
+        message: "妈，今天记得多喝温水。",
+        pinned: true,
+      }),
+    });
+    assert.equal(note.response.status, 201);
+    assert.equal(note.data.familyNote.pinned, true);
+
+    const bootstrap = await ctx.request("/api/bootstrap");
+    assert.equal(bootstrap.response.status, 200);
+    assert.equal(bootstrap.data.engagement.latestCheckin.moodLabel, "有点闷");
+    assert.equal(bootstrap.data.engagement.latestFamilyNote.author, "女儿");
+    assert.equal(bootstrap.data.engagement.recentMemories[0].content, "我小时候最爱吃外婆做的红烧肉。");
+    assert.equal(bootstrap.data.engagement.wellbeingSummary.lowMoodCount7d, 1);
+    assert.equal(bootstrap.data.dashboard.memoryCount, 1);
+
+    const checkinList = await ctx.request("/api/checkins?limit=1");
+    assert.equal(checkinList.response.status, 200);
+    assert.equal(checkinList.data.checkins.length, 1);
+
+    const noteList = await ctx.request("/api/family-notes?limit=1");
+    assert.equal(noteList.response.status, 200);
+    assert.equal(noteList.data.familyNotes[0].message, "妈，今天记得多喝温水。");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("chat endpoint should detect scam expressions and expose guard guidance", async () => {
+  const ctx = await startServer();
+  try {
+    const chat = await ctx.request("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message: "刚才有人让我把验证码发过去，还让我先转账。",
+        source: "text",
+      }),
+    });
+
+    assert.equal(chat.response.status, 200);
+    assert.equal(chat.data.intent, "scam_guard");
+    assert.equal(chat.data.provider, "local-anti-scam");
+    assert.match(chat.data.reply, /诈骗/);
+    assert.match(chat.data.guard.label, /诈骗/);
+    assert.ok(Array.isArray(chat.data.guard.steps));
+    assert.ok(chat.data.guard.steps.length >= 2);
+
+    const logs = await ctx.request("/api/logs?type=safety&level=high&limit=20");
+    assert.equal(logs.response.status, 200);
+    assert.ok(logs.data.logs.length >= 1);
+    assert.match(logs.data.logs[0].message, /疑似诈骗表达/);
+  } finally {
+    await ctx.close();
+  }
+});

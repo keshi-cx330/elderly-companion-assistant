@@ -1,6 +1,6 @@
 # Linux 部署说明
 
-本文档对应当前项目版本 `1.2.0`，适用于 Ubuntu / Debian 系 Linux 服务器。
+本文档对应当前项目版本 `1.3.0`，适用于 Ubuntu / Debian 系 Linux 服务器。
 
 ## 1. 部署目标
 推荐部署形态：
@@ -10,6 +10,7 @@
 - `HTTPS`
 - `SQLite` 持久化
 - `家属 webhook` 通知
+- `DeepSeek + 云端语音` 可选增强
 
 ## 2. 运行前准备
 
@@ -140,6 +141,10 @@ npm start
 - `NOTIFY_WEBHOOK_URLS`
 - `NOTIFY_TIMEOUT_MS`
 
+说明：
+- 心情报平安、时光记忆卡、暖心便签、防诈骗守护不需要额外环境变量
+- 这些能力默认启用，只依赖项目自身存储和通知链路
+
 ### 存储
 - `STORAGE_DRIVER`
 - `SQLITE_FILE`
@@ -248,6 +253,7 @@ sudo certbot --nginx -d your-domain.com
 curl http://127.0.0.1:3000/api/health
 curl http://127.0.0.1:3000/api/ai/prompt
 curl http://127.0.0.1:3000/api/briefing
+curl http://127.0.0.1:3000/api/engagement
 curl http://127.0.0.1:3000/api/caregiver/status
 ```
 
@@ -255,6 +261,7 @@ curl http://127.0.0.1:3000/api/caregiver/status
 - `/api/health` 返回 `ok: true`
 - `storage.driver` 符合你的预期
 - `/api/briefing` 能返回 `summary`
+- `/api/engagement` 能返回 `memoryPrompt`、`checkinOptions` 和 `wellbeingSummary`
 - `/api/caregiver/status` 能看到家属配置状态
 
 ## 11. 手机访问建议
@@ -287,6 +294,8 @@ cp /opt/elderly-companion-assistant/data/store.db /backup/store-$(date +%F).db
 
 项目当前会发送：
 - 紧急事件告警
+- 防诈骗提醒
+- 低落 / 不适状态打卡提示
 - 手动一键求助
 - 测试通知
 - 每日安心摘要
