@@ -177,34 +177,50 @@ const emergencyRules = [
   {
     type: "emergency_cardio",
     label: "疑似胸痛或呼吸困难",
-    regex: /(胸痛|胸口痛|胸闷|喘不过气|呼吸困难|心慌|心悸|气短)/,
-    steps: ["立即拨打 120 并说明地址与症状", "保持坐姿或半卧位，不要独自走动", "联系紧急联系人尽快到场"],
+    regex: /(胸痛|胸口(?:很)?痛|胸口疼|胸闷|像被压住|喘不过气|呼吸困难|心慌|心悸|气短)/,
+    steps: ["保持坐姿或半卧位，不要独自走动", "尽量少说话，慢一点呼吸", "让手机保持畅通，方便救援或家人回拨"],
     lead: "我在，先别硬撑。请马上坐下或半躺，尽量少走动，慢一点呼吸。",
-    followup: "胸痛和喘不过气不能拖，请先拨打 120。",
+    followup: "胸痛和喘不过气不能拖，我先按急救流程继续处理。",
+  },
+  {
+    type: "emergency_overdose",
+    label: "疑似药物过量或误服",
+    regex: /(吃了很多药|药吃多了|吃错药|吞了很多药|药物过量|刚刚吃了很多药|误服|多吃了药)/,
+    steps: ["先别再继续吃药，也不要自己催吐", "把药盒、药名或剩余药片放在手边", "保持清醒和电话畅通，等待救援或家人回拨"],
+    lead: "我在，先别再继续吃药，也不要自己催吐。把刚才吃的药盒或药名放在手边，我来按药物过量流程处理。",
+    followup: "药物过量有危险，我先按急救流程继续处理。",
+  },
+  {
+    type: "emergency_bleeding",
+    label: "疑似大量出血",
+    regex: /(流了很多血|一直流血|大出血|血止不住|出血很多)/,
+    steps: ["立刻用干净毛巾、衣物或纸巾持续按住伤口", "如果不是骨折或剧痛，可以适当抬高受伤部位", "尽量原地等待救援或家人回拨，不要反复走动"],
+    lead: "我在，先用干净毛巾、衣物或者纸巾持续按住出血处，先别松手。",
+    followup: "大量出血风险很高，我先按急救流程继续处理。",
   },
   {
     type: "emergency_fall",
     label: "疑似跌倒或外伤",
     regex: /(摔倒|跌倒|出血|撞到头|骨折|起不来|流血)/,
-    steps: ["先判断是否还能安全移动，避免强行站起", "拨打 120 或请邻居协助", "联系紧急联系人并说明受伤部位"],
+    steps: ["先判断是否还能安全移动，避免强行站起", "如果撞到头、腰腿剧痛或怀疑骨折，先别乱动", "尽量把手机放在手边，等待救援或家人回拨"],
     lead: "我在，先别急着起身，避免再次受伤。",
-    followup: "如果起不来、出血明显或者撞到头，请优先叫人帮忙并拨打 120。",
+    followup: "如果起不来、出血明显或者撞到头，风险会很高，我先按急救流程继续处理。",
   },
   {
     type: "emergency_neuro",
     label: "疑似意识或神经风险",
     regex: /(晕倒|昏迷|抽搐|意识不清|中风|口齿不清|半边无力)/,
-    steps: ["立即拨打 120", "让周围人协助保持呼吸通畅", "准备门牌地址和既往病史信息"],
+    steps: ["保持当前体位，不要自己走动", "尽量保持呼吸顺畅，先不要进食喝水", "如果旁边有人，请示意对方留在身边"],
     lead: "我在，先不要自己走动，也不要硬撑着站起来。",
-    followup: "这种情况有中风或意识风险，请立刻拨打 120。",
+    followup: "这种情况有中风或意识风险，我先按急救流程继续处理。",
   },
   {
     type: "emergency_general",
     label: "疑似高风险紧急表达",
     regex: /(救命|(?:快|像是|可能)?不行了|紧急|急救|剧痛|疼得厉害|头晕厉害|肚子很痛)/,
-    steps: ["立即拨打 120", "联系紧急联系人", "保持电话畅通，等待救援到达"],
+    steps: ["先坐下或躺下，别自己走动", "让手机保持畅通，方便救援或家人回拨", "如果身边有人，立刻请对方过来帮忙"],
     lead: "我在，先别慌，先坐下或躺下，别自己走动。",
-    followup: "这种情况不能硬撑，如果还在加重，请马上拨打 120。",
+    followup: "这种情况不能硬撑，我先按紧急流程继续处理。",
   },
 ];
 
@@ -266,6 +282,74 @@ function detectSymptomAlert(message) {
     steps: matched.steps,
     reply: matched.reply,
     suggestions: matched.suggestions,
+  };
+}
+
+function summarizeSteps(steps = [], limit = 3) {
+  return steps
+    .filter(Boolean)
+    .slice(0, limit)
+    .map((item) => safeText(item, 80))
+    .join("；");
+}
+
+function buildEscalationWorkflow({
+  profile,
+  label,
+  caregiverName = "",
+  canNotifyCaregiver = false,
+  mode = "emergency",
+}) {
+  const elderName = safeText(profile?.name || "老人", 30) || "老人";
+  const address = safeText(profile?.address || "", 120);
+  const phone = safePhone(profile?.caregiverPhone || profile?.emergencyContactPhone || "");
+  const contactName = safeText(caregiverName || profile?.caregiverName || profile?.emergencyContactName || "", 30);
+  const caregiverStatusLabel = contactName
+    ? canNotifyCaregiver
+      ? `正在同步通知${contactName}`
+      : `已整理给${contactName}的联络内容`
+    : "";
+
+  const emergencyService =
+    mode === "emergency"
+      ? {
+          label: "120 急救中心",
+          phone: "120",
+          status: "initiated",
+          statusLabel: "已启动 120 紧急联络流程",
+          message: address
+            ? `会把“${label}”和登记地址 ${address} 一并同步给 120。`
+            : `会把“${label}”和老人当前情况先同步给 120。`,
+        }
+      : null;
+
+  const caregiver = contactName
+    ? {
+        name: contactName,
+        phone,
+        status: canNotifyCaregiver ? "syncing" : "prepared",
+        statusLabel: caregiverStatusLabel,
+        message: address ? `会把当前情况和地址 ${address} 一并告诉${contactName}。` : `会把当前情况整理后告诉${contactName}。`,
+      }
+    : null;
+
+  const summaryParts = [emergencyService?.statusLabel, caregiver?.statusLabel].filter(Boolean);
+
+  return {
+    mode: "demo_auto_dispatch",
+    started: summaryParts.length > 0,
+    address,
+    summary: summaryParts.length ? `${summaryParts.join("，")}。` : "已启动紧急留痕流程。",
+    emergencyService,
+    caregiver,
+    script:
+      mode === "emergency"
+        ? address
+          ? `${elderName}出现“${label}”，地址是 ${address}。`
+          : `${elderName}出现“${label}”，请尽快回拨确认。`
+        : address
+          ? `${elderName}出现“${label}”，地址是 ${address}，请尽快回拨确认。`
+          : `${elderName}出现“${label}”，请尽快回拨确认。`,
   };
 }
 
@@ -415,30 +499,40 @@ function buildAssistantResponse({
   const fallbackContactName = safeText(caregiverName || profile?.caregiverName || profile?.emergencyContactName || "", 30);
 
   if (emergency) {
-    const contactLine = fallbackContactName
-      ? canNotifyCaregiver
-        ? `我也会同步提醒${fallbackContactName}留意您的情况。`
-        : `请尽快联系${fallbackContactName}。`
-      : "请马上联系身边能帮您的人。";
-    const address = profile?.address ? `登记地址是 ${profile.address}。` : "";
+    const dispatch = buildEscalationWorkflow({
+      profile,
+      label: emergency.label,
+      caregiverName: fallbackContactName,
+      canNotifyCaregiver,
+      mode: "emergency",
+    });
+    const actionLine = summarizeSteps(emergency.steps, 3);
     return {
-      reply: `${emergency.lead || "我在，先别慌。"}${emergency.followup || "请立刻拨打 120。"}${contactLine}${address}`,
-      suggestions: ["立即拨打 120", "联系紧急联系人", "大声呼叫附近的人"],
+      reply: `${emergency.lead || "我在，先别慌。"}${emergency.followup || "我先按急救流程继续处理。"}${dispatch.summary}${
+        dispatch.emergencyService?.message || "我会先把当前情况整理进紧急联络流程。"
+      }${dispatch.caregiver?.message || "如果身边有人，我也建议您先请对方留在旁边。"}${
+        actionLine ? `您先按我说的做：${actionLine}。` : ""
+      }我会继续陪着您。`,
+      suggestions: ["联系紧急联系人", "重复我的地址", "我身边有人"],
       intent: "emergency",
+      dispatch,
     };
   }
 
   if (symptomAlert) {
-    const notifyLine =
-      fallbackContactName && canNotifyCaregiver
-        ? `我也会同步提醒${fallbackContactName}留意您的情况。`
-        : fallbackContactName
-          ? `我建议您也给${fallbackContactName}打个电话，让家里人知道。`
-          : "如果身边有人，先请他陪着您。";
+    const dispatch = buildEscalationWorkflow({
+      profile,
+      label: symptomAlert.label,
+      caregiverName: fallbackContactName,
+      canNotifyCaregiver,
+      mode: "symptom",
+    });
+    const notifyLine = dispatch.caregiver?.message || "如果身边有人，先请他陪着您。";
     return {
-      reply: `${symptomAlert.reply}${notifyLine}`,
+      reply: `${symptomAlert.reply}${dispatch.summary}${notifyLine}`,
       suggestions: symptomAlert.suggestions || ["联系紧急联系人", "提醒我半小时后再看看", "立即拨打 120"],
       intent: "symptom_guidance",
+      dispatch,
     };
   }
 

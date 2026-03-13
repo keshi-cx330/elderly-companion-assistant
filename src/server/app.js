@@ -901,6 +901,7 @@ async function handleApi(req, res, urlObj, options) {
         }
 
         if (emergency) {
+          const dispatch = assistant.dispatch || null;
           addEvent(
             store,
             emergency.type,
@@ -909,20 +910,34 @@ async function handleApi(req, res, urlObj, options) {
               source,
               label: emergency.label,
               steps: emergency.steps,
+              dispatch,
+            },
+            "high"
+          );
+          addEvent(
+            store,
+            "emergency_dispatch",
+            `系统已启动紧急联络流程：${dispatch?.summary || "准备联系 120 与联系人"}`,
+            {
+              source,
+              label: emergency.label,
+              dispatch,
             },
             "high"
           );
           notificationPlan = {
             type: "emergency_alert",
             title: `${store.profile.name || "老人"}触发紧急告警`,
-            message: `${message.slice(0, 80)}。请尽快联系${store.profile.name || "老人"}，必要时直接拨打 120。`,
+            message: `${message.slice(0, 80)}。系统已启动紧急联络流程，请尽快电话确认${store.profile.name || "老人"}当前状态。`,
             meta: {
               label: emergency.label,
               address: store.profile.address,
               contactPhone: store.profile.emergencyContactPhone,
+              dispatch,
             },
           };
         } else if (symptomAlert) {
+          const dispatch = assistant.dispatch || null;
           addEvent(
             store,
             symptomAlert.type,
@@ -931,16 +946,29 @@ async function handleApi(req, res, urlObj, options) {
               source,
               label: symptomAlert.label,
               steps: symptomAlert.steps,
+              dispatch,
+            },
+            "normal"
+          );
+          addEvent(
+            store,
+            "symptom_followup",
+            `系统已启动照护跟进流程：${dispatch?.summary || "准备联系家属回拨确认"}`,
+            {
+              source,
+              label: symptomAlert.label,
+              dispatch,
             },
             "normal"
           );
           notificationPlan = {
             type: "symptom_guidance_alert",
             title: `${store.profile.name || "老人"}出现需要留意的身体不适`,
-            message: `${message.slice(0, 80)}。系统已给出照护建议，请尽快电话确认目前状态。`,
+            message: `${message.slice(0, 80)}。系统已给出照护建议并启动家属跟进流程，请尽快电话确认目前状态。`,
             meta: {
               label: symptomAlert.label,
               steps: symptomAlert.steps,
+              dispatch,
             },
           };
         } else if (scamRisk) {
@@ -1015,6 +1043,7 @@ async function handleApi(req, res, urlObj, options) {
           reply: assistant.reply,
           intent: assistant.intent,
           suggestions: assistant.suggestions,
+          dispatch: assistant.dispatch || null,
           emergency: emergency
             ? {
                 label: emergency.label,
@@ -1022,6 +1051,7 @@ async function handleApi(req, res, urlObj, options) {
                 contactName: store.profile.emergencyContactName,
                 contactPhone: store.profile.emergencyContactPhone,
                 address: store.profile.address,
+                dispatch: assistant.dispatch || null,
               }
             : null,
           symptom: symptomAlert
@@ -1030,6 +1060,7 @@ async function handleApi(req, res, urlObj, options) {
                 steps: symptomAlert.steps,
                 contactName: store.profile.emergencyContactName,
                 contactPhone: store.profile.emergencyContactPhone,
+                dispatch: assistant.dispatch || null,
               }
             : null,
           reminder: createdReminders[0] ? decorateReminder(createdReminders[0]) : null,
@@ -1059,6 +1090,7 @@ async function handleApi(req, res, urlObj, options) {
               responsePayload.emergency?.contactName ||
               responsePayload.symptom?.contactName ||
               "",
+            dispatchSummary: responsePayload.dispatch?.summary || "",
           }
         : null;
     }

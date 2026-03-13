@@ -861,23 +861,42 @@ function renderLogs() {
 function openEmergencyModal(payload = null) {
   const emergency = payload || state.activeEmergency || {
     label: "请立刻进行紧急求助",
-    steps: ["立即拨打 120", "联系紧急联系人", "保持电话畅通，等待帮助到达"],
+    steps: ["先坐下或躺下，别自己走动", "让手机保持畅通", "如果身边有人，立刻请对方过来帮忙"],
     contactName: state.profile.emergencyContactName,
     contactPhone: state.profile.emergencyContactPhone,
     address: state.profile.address,
   };
+  const dispatch = emergency.dispatch || null;
+  const workflowSteps = [];
+  if (dispatch?.emergencyService?.statusLabel) {
+    workflowSteps.push(
+      dispatch.address
+        ? `${dispatch.emergencyService.statusLabel}，并附带地址：${dispatch.address}`
+        : dispatch.emergencyService.statusLabel
+    );
+  }
+  if (dispatch?.caregiver?.statusLabel) {
+    workflowSteps.push(dispatch.caregiver.statusLabel);
+  }
 
   state.activeEmergency = emergency;
   refs.emergencyTitle.textContent = emergency.label || "检测到高风险表达";
-  refs.emergencySummary.textContent = emergency.address
-    ? `请优先说明地址：${emergency.address}。如果无法完整表达，请先拨打 120，再联系家属。`
-    : "请先拨打 120，然后联系紧急联系人，并保持电话畅通。";
+  refs.emergencySummary.textContent = dispatch?.summary
+    ? `${dispatch.summary}${emergency.address ? `登记地址：${emergency.address}。` : ""}您先保持当前体位，我会继续陪着您。`
+    : emergency.address
+      ? `请优先说明地址：${emergency.address}。如果无法完整表达，请先拨打 120，再联系家属。`
+      : "请先拨打 120，然后联系紧急联系人，并保持电话畅通。";
   refs.emergencySteps.innerHTML = "";
-  (emergency.steps || []).forEach((step) => {
+  [...workflowSteps, ...(emergency.steps || [])].forEach((step) => {
     refs.emergencySteps.appendChild(createTextNode("li", step));
   });
+  refs.call120.textContent = dispatch?.emergencyService ? "直接拨打 120（备用）" : "拨打 120";
   refs.callContact.setAttribute("href", emergency.contactPhone ? `tel:${emergency.contactPhone}` : "#");
-  refs.callContact.textContent = emergency.contactName ? `联系 ${emergency.contactName}` : "联系紧急联系人";
+  refs.callContact.textContent = emergency.contactName
+    ? dispatch?.caregiver
+      ? `补充联系 ${emergency.contactName}`
+      : `联系 ${emergency.contactName}`
+    : "联系紧急联系人";
   refs.emergencyModal.classList.remove("hidden");
 }
 
@@ -1351,7 +1370,11 @@ async function submitChat(message, source = "text") {
     if (data.symptom) {
       showToast("已生成照护建议");
     }
-    if (data.notification) {
+    if (data.notification?.delivered) {
+      showToast("紧急通知已同步给联系人");
+    } else if (data.dispatch?.started) {
+      showToast(data.dispatch.emergencyService ? "已启动紧急联络流程" : "已启动家属跟进流程");
+    } else if (data.notification) {
       if (data.notification.delivered) {
         showToast("已通知联系人");
       } else if (data.notification.contactName) {

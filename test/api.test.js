@@ -220,12 +220,15 @@ test("chat endpoint should detect emergency expressions and leave logs", async (
     assert.equal(chat.data.intent, "emergency");
     assert.match(chat.data.reply, /我在|先别慌/);
     assert.match(chat.data.reply, /先坐下|躺下/);
+    assert.match(chat.data.reply, /已启动 120|联络流程|通知张先生/);
+    assert.equal(chat.data.dispatch.mode, "demo_auto_dispatch");
+    assert.equal(chat.data.emergency.dispatch.emergencyService.phone, "120");
     assert.equal(chat.data.notification.attempted, false);
 
     const logs = await ctx.request("/api/logs?type=emergency&level=high&limit=20");
     assert.equal(logs.response.status, 200);
     assert.ok(logs.data.logs.length >= 1);
-    assert.match(logs.data.logs[0].message, /高风险表达|紧急上报/);
+    assert.ok(logs.data.logs.some((item) => /高风险表达|紧急上报|已启动紧急联络流程/.test(item.message)));
   } finally {
     await ctx.close();
   }
@@ -254,12 +257,45 @@ test("chat endpoint should provide symptom guidance and leave symptom logs", asy
     assert.equal(chat.data.intent, "symptom_guidance");
     assert.ok(chat.data.symptom);
     assert.match(chat.data.reply, /先坐下|躺下/);
+    assert.match(chat.data.reply, /跟进流程|告诉张先生|家里人/);
+    assert.equal(chat.data.dispatch.mode, "demo_auto_dispatch");
+    assert.equal(chat.data.dispatch.caregiver.name, "张先生");
     assert.equal(chat.data.notification.attempted, false);
 
     const logs = await ctx.request("/api/logs?type=symptom&limit=20");
     assert.equal(logs.response.status, 200);
     assert.ok(logs.data.logs.length >= 1);
-    assert.match(logs.data.logs[0].message, /照护症状/);
+    assert.ok(logs.data.logs.some((item) => /照护症状|照护跟进流程/.test(item.message)));
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("chat endpoint should treat medication overdose as emergency workflow", async () => {
+  const ctx = await startServer();
+  try {
+    await ctx.request("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify({
+        emergencyContactName: "张先生",
+        emergencyContactPhone: "13900000000",
+        address: "北京市海淀区学院路 1 号",
+      }),
+    });
+
+    const chat = await ctx.request("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message: "我刚刚吃了很多药",
+        source: "text",
+      }),
+    });
+
+    assert.equal(chat.response.status, 200);
+    assert.equal(chat.data.intent, "emergency");
+    assert.equal(chat.data.emergency.label, "疑似药物过量或误服");
+    assert.match(chat.data.reply, /别再继续吃药|不要自己催吐/);
+    assert.match(chat.data.reply, /120|张先生/);
   } finally {
     await ctx.close();
   }
