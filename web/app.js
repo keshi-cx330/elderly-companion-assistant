@@ -185,6 +185,7 @@ let cloudRecordingActive = false;
 let cloudRecordingTimer = null;
 let cloudSpeechAudio = null;
 let cloudSpeechAudioUrl = "";
+let recognitionHadResult = false;
 const reminderMarks = new Map();
 
 const CLOUD_RECORD_LIMIT_MS = 9000;
@@ -865,26 +866,45 @@ function ensureRecognition() {
   recognition.lang = "zh-CN";
   recognition.interimResults = false;
   recognition.continuous = false;
+  recognition.maxAlternatives = 1;
 
   recognition.onstart = () => {
     recognitionActive = true;
+    recognitionHadResult = false;
+    setVoiceStatusText("请直接说话，说完或停顿后会自动结束");
     updateVoiceUi();
   };
 
   recognition.onend = () => {
     recognitionActive = false;
+    recognition = null;
+    if (!recognitionHadResult) {
+      setVoiceStatusText("本轮识别已结束，没有听清楚的话可以再点一次");
+    }
     updateVoiceUi();
   };
 
-  recognition.onerror = () => {
+  recognition.onerror = (event) => {
     recognitionActive = false;
-    showToast("语音识别失败，请重试");
+    recognition = null;
+    const errorCode = String(event?.error || "");
+    if (errorCode === "not-allowed" || errorCode === "service-not-allowed") {
+      showToast("麦克风权限未开启，请先允许浏览器使用麦克风");
+      setVoiceStatusText("麦克风权限未开启");
+    } else if (errorCode === "no-speech") {
+      showToast("没有听到清晰语音，请再说一次");
+      setVoiceStatusText("没有听到清晰语音，请再点一次");
+    } else {
+      showToast("语音识别失败，请重试");
+      setVoiceStatusText("语音识别失败，请再点一次");
+    }
     updateVoiceUi();
   };
 
   recognition.onresult = (event) => {
     const transcript = event.results?.[0]?.[0]?.transcript?.trim() || "";
     if (!transcript) return;
+    recognitionHadResult = true;
     refs.chatInput.value = transcript;
     void submitChat(transcript, "voice");
     refs.chatInput.value = "";
@@ -1068,6 +1088,7 @@ async function handleVoiceButtonClick() {
     try {
       speechRecognition.start();
     } catch {
+      recognition = null;
       setVoiceStatusText("语音识别启动失败，请重试");
     }
     return;
