@@ -186,6 +186,8 @@ let cloudRecordingTimer = null;
 let cloudSpeechAudio = null;
 let cloudSpeechAudioUrl = "";
 let recognitionHadResult = false;
+let browserTtsPrimed = false;
+let browserTtsWarmupBound = false;
 const reminderMarks = new Map();
 
 const CLOUD_RECORD_LIMIT_MS = 9000;
@@ -256,14 +258,83 @@ function stopSpeechPlayback() {
   clearCloudSpeechAudio();
 }
 
+function primeBrowserTts() {
+  if (!browserTtsSupported() || browserTtsPrimed) return;
+  try {
+    const utter = new SpeechSynthesisUtterance(" ");
+    utter.lang = "zh-CN";
+    utter.volume = 0;
+    utter.rate = 1;
+    utter.pitch = 1;
+    utter.onstart = () => {
+      browserTtsPrimed = true;
+    };
+    utter.onend = () => {
+      browserTtsPrimed = true;
+    };
+    utter.onerror = () => {};
+    window.speechSynthesis.speak(utter);
+    browserTtsPrimed = true;
+  } catch {}
+}
+
+function bindBrowserTtsWarmup() {
+  if (browserTtsWarmupBound || !browserTtsSupported()) return;
+  const warmup = () => {
+    primeBrowserTts();
+    document.removeEventListener("pointerdown", warmup, true);
+    document.removeEventListener("touchstart", warmup, true);
+    document.removeEventListener("keydown", warmup, true);
+  };
+  document.addEventListener("pointerdown", warmup, true);
+  document.addEventListener("touchstart", warmup, true);
+  document.addEventListener("keydown", warmup, true);
+  browserTtsWarmupBound = true;
+}
+
 function speakWithBrowser(text) {
-  if (!browserTtsSupported() || !text) return;
+  if (!browserTtsSupported() || !text) return Promise.resolve(false);
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "zh-CN";
   utter.rate = 0.94;
   utter.pitch = 1;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utter);
+
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const settle = (error) => {
+      if (finished) return;
+      finished = true;
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(true);
+    };
+
+    utter.onstart = () => {
+      browserTtsPrimed = true;
+      settle();
+    };
+    utter.onend = () => {
+      browserTtsPrimed = true;
+      settle();
+    };
+    utter.onerror = () => {
+      settle(new Error("浏览器语音播报失败"));
+    };
+
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+      setTimeout(() => {
+        if (finished) return;
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) return;
+        settle(new Error(browserTtsPrimed ? "浏览器语音播报失败" : "浏览器拦截了自动播报"));
+      }, 1200);
+    } catch (error) {
+      settle(error instanceof Error ? error : new Error("浏览器语音播报失败"));
+    }
+  });
 }
 
 async function speakWithCloud(text) {
@@ -310,7 +381,15 @@ async function speak(text, mode = "reply") {
     }
   }
 
-  speakWithBrowser(text);
+  try {
+    await speakWithBrowser(text);
+  } catch (error) {
+    if (!browserTtsPrimed) {
+      showToast("浏览器还没激活自动播报，请先点一次语音按钮或晨间播报");
+      return;
+    }
+    showToast(error.message || "本地语音播报失败");
+  }
 }
 
 async function api(path, options = {}) {
@@ -562,6 +641,7 @@ function renderQuickActions(actions = state.quickActions) {
         return;
       }
       refs.chatInput.value = item;
+      primeBrowserTts();
       void submitChat(item, "text");
       refs.chatInput.value = "";
     });
@@ -1064,6 +1144,7 @@ function stopCloudRecording() {
 }
 
 async function handleVoiceButtonClick() {
+  primeBrowserTts();
   const mode = getEffectiveAsrMode();
   if (mode === "cloud") {
     if (cloudRecordingActive) {
@@ -1099,6 +1180,7 @@ async function handleVoiceButtonClick() {
 }
 
 function initVoice() {
+  bindBrowserTtsWarmup();
   if (!voiceButtonBound) {
     refs.voiceBtn.addEventListener("click", () => {
       void handleVoiceButtonClick();
@@ -1306,6 +1388,7 @@ function bindForms() {
     const message = refs.chatInput.value.trim();
     if (!message) return;
     refs.chatInput.value = "";
+    primeBrowserTts();
     void submitChat(message, "text");
   });
 
@@ -1435,6 +1518,7 @@ function bindForms() {
   refs.closeEmergency.addEventListener("click", closeEmergencyModal);
 
   refs.briefingPlay.addEventListener("click", () => {
+    primeBrowserTts();
     void speak(state.briefing.summary || "我来陪您慢慢看今天的安排。", "reply");
   });
 
